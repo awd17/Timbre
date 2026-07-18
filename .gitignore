@@ -1,0 +1,26 @@
+# Xcode
+DerivedData/
+build/
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Test / coverage artifacts
+TestResults/
+*.xcresult
+*.profraw
+*.profdata
+coverage/
+
+# macOS
+.DS_Store
+
+# SwiftPM
+.build/
+.swiftpm/
+Packages/
+Package.resolved
