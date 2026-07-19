@@ -1,9 +1,10 @@
 # Timbre
 
 Menu-bar voice dictation for macOS.  
-Start a session from the status item.  
-Speak, then stop.  
-The app transcribes locally with Parakeet and copies the text to the clipboard.
+Start a session from the status item, or press **Control+Shift+D** (`⌃⇧D`) from anywhere.  
+Speak, then stop (menu or the same shortcut).  
+The app transcribes locally with Parakeet and copies the text to the clipboard.  
+Paste manually where you need it (automatic insertion is not implemented yet).
 
 **Repository:** https://github.com/awd17/Timbre
 
@@ -49,8 +50,10 @@ xcodebuild -scheme Timbre -destination 'platform=macOS' test
 
 In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
 On first launch (when the model is not installed), complete setup: microphone → download/verify → Done.  
-Open the waveform status item.  
-Use Start, Stop, Copy Again, or Quit.
+Open the waveform status item, or use the global shortcut **⌃⇧D** to Start/Stop without opening the menu.  
+Use Start, Stop, Copy Again, or Quit in the menu as before.
+
+The built-in shortcut is a temporary development default. Shortcut customization UI is not shipped yet; see [`docs/GLOBAL_DICTATION_SHORTCUT.md`](docs/GLOBAL_DICTATION_SHORTCUT.md).
 
 Parakeet is the default engine in **Debug and Release**. No backend launch argument is required.
 

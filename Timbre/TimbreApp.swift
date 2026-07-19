@@ -10,6 +10,7 @@ struct TimbreApp: App {
             MenuBarDictationView(
                 controller: appDelegate.controller,
                 setupCoordinator: appDelegate.setupCoordinator,
+                shortcutCoordinator: appDelegate.shortcutCoordinator,
                 onOpenSetup: {
                     appDelegate.presentSetupWindow()
                 }
@@ -26,6 +27,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let controller: AssistantController
     let modelManager: ParakeetModelManager
     let setupCoordinator: SetupCoordinator?
+    let shortcutCoordinator: DictationShortcutCoordinator
 
     private var debugWindow: NSWindow?
     private var setupWindowController: SetupWindowController?
@@ -50,7 +52,17 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         controller = AssistantController(
             transcription: Self.makeTranscriptionService(modelManager: modelManager)
         )
+
+        shortcutCoordinator = DictationShortcutCoordinator(
+            controller: controller,
+            setupCoordinator: setupCoordinator,
+            shortcutService: KeyboardShortcutsGlobalShortcutService()
+        )
         super.init()
+
+        shortcutCoordinator.setPresentSetup { [weak self] in
+            self?.presentSetupWindow()
+        }
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -73,6 +85,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         #endif
 
+        if !Self.shouldSkipGlobalShortcut {
+            shortcutCoordinator.start()
+        } else {
+            TimbreLog.line("Timbre shortcut: skipped (--parakeet-fixture)")
+        }
+
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
             presentSetupWindow()
         }
@@ -83,8 +101,20 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        shortcutCoordinator.stop()
         controller.prepareForTermination()
         return .terminateNow
+    }
+
+    private static var shouldSkipGlobalShortcut: Bool {
+        #if DEBUG
+        return TranscriptionBackendSelection.wantsParakeetFixture(
+            arguments: ProcessInfo.processInfo.arguments,
+            isDebug: true
+        )
+        #else
+        return false
+        #endif
     }
 
     func presentSetupWindow() {
@@ -196,6 +226,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             rootView: MenuBarDictationView(
                 controller: controller,
                 setupCoordinator: nil,
+                shortcutCoordinator: shortcutCoordinator,
                 onOpenSetup: nil
             )
             .frame(minWidth: 320, minHeight: 220)

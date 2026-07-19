@@ -3,6 +3,7 @@ import SwiftUI
 struct MenuBarDictationView: View {
     var controller: AssistantController
     var setupCoordinator: SetupCoordinator?
+    var shortcutCoordinator: DictationShortcutCoordinator?
     var onOpenSetup: (() -> Void)?
 
     var body: some View {
@@ -34,6 +35,13 @@ struct MenuBarDictationView: View {
                 Text("Finish setup to start dictation.")
                     .font(.body)
                     .foregroundStyle(.secondary)
+            }
+
+            if let hint = shortcutCoordinator?.menuHintText() {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("shortcutHint")
             }
 
             if let title = setupCoordinator.menuActionTitle {
@@ -71,6 +79,13 @@ struct MenuBarDictationView: View {
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("statusMessage")
                 .accessibilityLabel(controller.statusMessage)
+
+            if let hint = shortcutCoordinator?.menuHintText() {
+                Text(hint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("shortcutHint")
+            }
 
             Text(controller.liveTranscript.isEmpty ? "—" : controller.liveTranscript)
                 .font(.body)

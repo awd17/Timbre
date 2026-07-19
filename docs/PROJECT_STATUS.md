@@ -7,7 +7,7 @@ Do not put long product history in `README.md`.
 ## Purpose
 
 Timbre is a menu-bar voice dictation app for macOS.  
-The user starts a session from the status item.  
+The user starts a session from the status item or the global shortcut.  
 The app shows a listening/processing status for Parakeet batch dictation (no live partials).  
 The user stops the session.  
 The app copies the final text to the clipboard.
@@ -40,12 +40,13 @@ The UI and the controller do not depend on a specific speech engine.
 - **Shared `ParakeetModelManager`** with installed vs loaded states (`ensureInstalled` / `ensureLoaded`)
 - **First-run setup in Debug and Release** (welcome → mic → download/verify → ready)
 - Dictation readiness requires installed model **and** granted microphone permission
+- **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; toggle Start/Stop)
 
 ### Not started / out of this milestone
 
 - Live Parakeet partial transcription / streaming / VAD / auto-stop
 - Full Settings screen / user model controls
-- Global keyboard shortcuts
+- Shortcut customization UI (`KeyboardShortcuts.Recorder` — required before public release)
 - Floating panel
 - Paste into the focused app
 - Read or replace selected text
@@ -61,11 +62,12 @@ The app is small and layered.
 
 ### Layers
 
-1. Views call `AssistantController` (dictation) and optionally `SetupCoordinator` (first-run).
+1. Views and the global shortcut coordinator call `AssistantController` (dictation) and optionally `SetupCoordinator` (first-run).
 2. `AssistantController` owns the session workflow.
 3. Transcription uses `TranscriptionServicing`.
 4. Clipboard uses `ClipboardServicing`.
 5. `ParakeetModelManager` owns model install/load; setup and Parakeet dictation share it.
+6. `DictationShortcutCoordinator` maps hotkey presses to Start/Stop/setup (no FluidAudio coupling).
 
 Backends:
 
@@ -76,6 +78,7 @@ Backends:
 Views must not import FluidAudio, AVFoundation, Core ML, or `AsrManager`.
 
 FluidAudio 0.15.5 is linked to both the **Timbre** app target and **ParakeetSmokeTest**.  
+KeyboardShortcuts 2.4.0 is linked to the **Timbre** app target only.  
 Launch construction is side-effect-free: no mic prompt, download, or model load until setup / Start.
 
 ### Session model
@@ -108,6 +111,12 @@ Timbre/
     MicrophonePermissionProviding.swift
     ClipboardServicing.swift
     ClipboardService.swift
+  Shortcuts/
+    DictationShortcutName.swift
+    GlobalShortcutServicing.swift
+    KeyboardShortcutsGlobalShortcutService.swift
+    DictationShortcutAction.swift
+    DictationShortcutCoordinator.swift
   Setup/
     TimbreSetupFeature.swift
     SetupCoordinator.swift
@@ -122,6 +131,7 @@ scripts/run-parakeet-smoke.sh
 docs/PARAKEET_SMOKE_TEST.md
 docs/PARAKEET_MICROPHONE_DICTATION.md
 docs/SETUP_AND_MODEL_MANAGEMENT.md
+docs/GLOBAL_DICTATION_SHORTCUT.md
 TimbreTests/
 TimbreUITests/
 ```
@@ -145,7 +155,7 @@ TimbreUITests/
 Do not start these items unless a task asks for them:
 
 - Live Parakeet partials / streaming ASR
-- Hotkeys
+- Shortcut Recorder / onboarding shortcut picker
 - Accessibility paste
 - Full Settings screens
 - Authentication
@@ -164,6 +174,7 @@ Do not start these items unless a task asks for them:
 8. The project added DEBUG opt-in Parakeet batch microphone dictation in the app.
 9. The project added gated first-run setup and a shared Parakeet model manager (installed vs loaded).
 10. The project made Parakeet the production default and enabled setup in Release.
+11. The project added a global dictation toggle shortcut (temporary ⌃⇧D).
 
 ## Related docs
 
@@ -171,4 +182,5 @@ Do not start these items unless a task asks for them:
 - Parakeet smoke test: `docs/PARAKEET_SMOKE_TEST.md`
 - Parakeet app mic path: `docs/PARAKEET_MICROPHONE_DICTATION.md`
 - Setup / model management: `docs/SETUP_AND_MODEL_MANAGEMENT.md`
+- Global shortcut: `docs/GLOBAL_DICTATION_SHORTCUT.md`
 - Repository: https://github.com/awd17/Timbre

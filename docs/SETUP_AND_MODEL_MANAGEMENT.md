@@ -14,6 +14,8 @@ Dictation readiness requires both:
 1. Model installed and valid on disk (or loaded in memory)
 2. Microphone permission granted
 
+The global dictation shortcut respects the same readiness gates: it will not start recording while setup is incomplete or the model is installing. When setup is required or failed, a shortcut press may present the existing setup window. See [`docs/GLOBAL_DICTATION_SHORTCUT.md`](GLOBAL_DICTATION_SHORTCUT.md).
+
 ## Architecture
 
 ```text
