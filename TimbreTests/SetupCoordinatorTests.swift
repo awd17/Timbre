@@ -266,6 +266,26 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.menuActionTitle)
     }
 
+    func testReactivationWhileModelLoadsPreservesCompletedSetup() {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: FakeMicrophonePermission(status: .granted),
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        model.setState(.loading)
+        coordinator.applicationDidBecomeActive()
+
+        XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        XCTAssertNil(coordinator.menuActionTitle)
+        XCTAssertNil(coordinator.menuStatusText)
+    }
+
     func testMissingModelOverridesStaleDismissedPref() async {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)

@@ -235,6 +235,7 @@ final class SetupCoordinator {
         }
 
         if !modelManager.state.isInstalled,
+           !modelManager.state.isInstalling,
            defaults.bool(forKey: Self.dismissedReadyKey) || step == .ready
         {
             // Stale completion prefs: required files are gone.
