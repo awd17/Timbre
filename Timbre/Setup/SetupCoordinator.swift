@@ -176,7 +176,15 @@ final class SetupCoordinator {
             step = .ready
         case .notInstalled, .checking:
             if defaults.bool(forKey: Self.completedWelcomeKey) {
-                step = .microphone
+                switch microphone.status {
+                case .granted:
+                    beginPreparationAfterMicrophoneGranted()
+                case .denied:
+                    step = .microphoneDenied
+                case .undetermined:
+                    step = .microphone
+                    Task { await requestMicrophoneAndContinue() }
+                }
             } else {
                 step = .welcome
             }

@@ -133,6 +133,27 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
+    func testMenuReentryAfterMicrophoneDeniedShowsRecovery() async {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        let mic = FakeMicrophonePermission(status: .undetermined)
+        mic.statusAfterRequest = .denied
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        coordinator.continueFromWelcome()
+        await waitUntil { coordinator.step == .microphoneDenied }
+        coordinator.markWindowVisible(false)
+        coordinator.presentRequestedFromMenu()
+
+        XCTAssertEqual(coordinator.step, .microphoneDenied)
+        XCTAssertEqual(mic.requestCallCount, 1)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
     func testSingleFlightInstallFromCoordinator() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
