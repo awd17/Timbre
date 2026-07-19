@@ -2,9 +2,8 @@
 
 Menu-bar voice dictation for macOS.  
 Start a session from the status item.  
-See the live transcript.  
-Stop the session.  
-Copy the text to the clipboard.
+Speak, then stop.  
+The app transcribes locally with Parakeet and copies the text to the clipboard.
 
 **Repository:** https://github.com/awd17/Timbre
 
@@ -13,9 +12,12 @@ For feature status, architecture, and contributor rules, see [`docs/PROJECT_STAT
 ## Requirements
 
 - macOS 14.6 or later
+- Apple Silicon (Parakeet / FluidAudio)
 - Xcode 16 or later
 - An Apple Development signing team for local runs
-- Microphone permission (and Speech Recognition permission for the default Apple Speech path)
+- Microphone permission for normal use
+
+Speech Recognition permission is only needed for the DEBUG `--apple-speech` comparison backend.
 
 ## Setup
 
@@ -33,7 +35,8 @@ App Sandbox is off.
 ## Build
 
 ```bash
-xcodebuild -scheme Timbre -destination 'platform=macOS' build
+xcodebuild -scheme Timbre -configuration Debug -destination 'platform=macOS' build
+xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' build
 ```
 
 ## Test
@@ -44,44 +47,59 @@ xcodebuild -scheme Timbre -destination 'platform=macOS' test
 
 ## Run
 
-In Xcode, press ⌘R.  
+In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
+On first launch (when the model is not installed), complete setup: microphone → download/verify → Done.  
 Open the waveform status item.  
 Use Start, Stop, Copy Again, or Quit.
 
+Parakeet is the default engine in **Debug and Release**. No backend launch argument is required.
+
 | Launch argument | Effect |
 |-----------------|--------|
-| *(none)* | Real Apple Speech and microphone (default in Debug and Release). In DEBUG, first-run setup may appear (gated; see below). |
+| *(none)* | Parakeet batch dictation + microphone. Setup appears when the model or mic is not ready. |
 | `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup. |
-| `--parakeet-transcription` | Debug only. Local Parakeet v2 batch transcription after Stop. |
-| `--parakeet-fixture` | Debug only. With `--parakeet-transcription`, run the committed WAV through the app path (no mic). Disables automatic setup. |
+| `--apple-speech` | Debug only. Apple Speech comparison backend. Disables Parakeet setup. |
+| `--parakeet-fixture` | Debug only. Run the committed WAV through the app path (no mic). Disables automatic setup. |
+| `--parakeet-transcription` | Deprecated no-op. Parakeet is already the default; logged once. |
 | `--debug-window` | Debug only. Opens the Timbre Debug window. |
 | `--disable-setup` | Debug only. Disables the automatic first-run setup window. |
+
+Release builds ignore all of the DEBUG-only flags above.
 
 ```bash
 # Path depends on your DerivedData location
 Timbre.app/Contents/MacOS/Timbre --debug-window --mock-transcription
-Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-transcription
+Timbre.app/Contents/MacOS/Timbre --debug-window --apple-speech
+Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-fixture
 ```
 
-Release builds always use Apple Speech and ignore the debug transcription flags.  
-Release builds do **not** show automatic setup or download the Parakeet model.
+DEBUG flag priority when several are present: fixture → mock → apple-speech → Parakeet default.
 
-## Parakeet / FluidAudio (for developers only)
+## Parakeet / FluidAudio
 
-The default app path uses Apple Speech.
+Production dictation is Parakeet v2 batch transcription (no live partials).  
+First Start loads the installed model into memory (`ensureLoaded`); later sessions reuse it.  
+Setup installs and verifies the model on disk (`ensureInstalled`) without keeping it loaded.
 
-### First-run setup (DEBUG, gated)
+Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md) and [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md).
 
-DEBUG builds can show a small setup window that requests microphone access, then downloads and verifies the Parakeet component (`ensureInstalled`), then releases it from memory.  
-Release keeps this off until a later PR makes Parakeet the default engine.
+### Clean Release verification
 
-Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md).
+Reset microphone TCC and local state, then exercise the **Release** product (not only Debug with simulated flags):
 
-### Menu-bar opt-in (DEBUG)
+```bash
+tccutil reset Microphone com.augustdrakton.Timbre
+# Optional if comparing DEBUG Apple Speech leftovers:
+tccutil reset SpeechRecognition com.augustdrakton.Timbre
 
-Batch microphone dictation through Parakeet is available with `--parakeet-transcription`.  
-It uses the shared `ParakeetModelManager.ensureLoaded()` path.  
-Full runbook: [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md).
+rm -rf "$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
+defaults delete com.augustdrakton.Timbre
+
+xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' build
+# Launch the Release .app from DerivedData Build/Products/Release/Timbre.app
+```
+
+Confirm: setup appears; microphone is requested; Speech Recognition is not; Start/Stop produces a clipboard transcript; DEBUG flags passed to the Release binary do not change backend or bypass setup.
 
 ### Smoke CLI
 

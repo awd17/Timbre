@@ -1,4 +1,3 @@
-#if DEBUG
 import AVFoundation
 import FluidAudio
 import Foundation
@@ -158,4 +157,3 @@ final class ParakeetCaptureBuffer: @unchecked Sendable {
         }
     }
 }
-#endif
