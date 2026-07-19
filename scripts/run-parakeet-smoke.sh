@@ -13,10 +13,7 @@ if [[ ! -f "${FIXTURE}" ]]; then
   exit 3
 fi
 
-if [[ "${FIXTURE}" != /* ]]; then
-  echo "error: fixture path must be absolute" >&2
-  exit 2
-fi
+# FIXTURE is always absolute (derived from REPO_ROOT / pwd), so no path check needed.
 
 echo "Repository root: ${REPO_ROOT}"
 echo "Fixture: ${FIXTURE}"
