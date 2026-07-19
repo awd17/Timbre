@@ -39,3 +39,9 @@ protocol TranscriptionServicing: AnyObject {
     func stop() async throws -> String
     func cancel() async
 }
+
+/// Backends that hold microphone hardware must tear it down synchronously on quit.
+@MainActor
+protocol TerminationHandling: AnyObject {
+    func shutdownForTermination()
+}

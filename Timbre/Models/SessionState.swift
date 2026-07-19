@@ -2,7 +2,7 @@ import Foundation
 
 enum SessionState: Equatable {
     case idle
-    case requestingPermission
+    case preparing
     case listening(transcript: String)
     case finishing(transcript: String)
     case completed(transcript: String)
@@ -10,7 +10,7 @@ enum SessionState: Equatable {
 
     var displayedTranscript: String {
         switch self {
-        case .idle, .requestingPermission:
+        case .idle, .preparing:
             return ""
         case .listening(let transcript),
              .finishing(let transcript),
@@ -24,12 +24,12 @@ enum SessionState: Equatable {
         switch self {
         case .idle:
             return "Ready"
-        case .requestingPermission:
-            return "Requesting permission..."
+        case .preparing:
+            return "Preparing..."
         case .listening:
             return "Listening..."
         case .finishing:
-            return "Finishing transcription..."
+            return "Processing..."
         case .completed:
             return "Copied to clipboard."
         case .failed(let message, _):
@@ -41,7 +41,7 @@ enum SessionState: Equatable {
         switch self {
         case .idle, .completed, .failed:
             return true
-        case .requestingPermission, .listening, .finishing:
+        case .preparing, .listening, .finishing:
             return false
         }
     }
@@ -59,7 +59,7 @@ enum SessionState: Equatable {
             return .listening(transcript: transcript)
         case .finishing:
             return .finishing(transcript: transcript)
-        case .idle, .requestingPermission, .completed, .failed:
+        case .idle, .preparing, .completed, .failed:
             // Ignore partials outside an active listen/finish phase.
             return self
         }

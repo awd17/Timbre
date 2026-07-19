@@ -18,6 +18,15 @@ struct SoftValidationResult {
     let hasOptionalPhrase: Bool
     let matchedOptionalPhrase: String?
     let passed: Bool
+
+    init(_ validation: ParakeetTranscriptValidation.Result) {
+        normalizedTranscript = validation.normalizedTranscript
+        hasQuickBrownFox = validation.hasQuickBrownFox
+        hasLazyDog = validation.hasLazyDog
+        hasOptionalPhrase = validation.hasOptionalPhrase
+        matchedOptionalPhrase = validation.matchedOptionalPhrase
+        passed = validation.passed
+    }
 }
 
 enum ParakeetSmokeTestRunner {
@@ -189,23 +198,7 @@ enum ParakeetSmokeTestRunner {
     }
 
     private static func softValidate(transcript: String) -> SoftValidationResult {
-        let normalized = normalize(transcript)
-        let hasQuickBrownFox = normalized.contains("quick brown fox")
-        let hasLazyDog = normalized.contains("lazy dog")
-        let optionalPhrases = ["timbre", "smoke test", "parakeet"]
-        let matched = optionalPhrases.first(where: { normalized.contains($0) })
-        let passed = !normalized.isEmpty
-            && hasQuickBrownFox
-            && hasLazyDog
-            && matched != nil
-        return SoftValidationResult(
-            normalizedTranscript: normalized,
-            hasQuickBrownFox: hasQuickBrownFox,
-            hasLazyDog: hasLazyDog,
-            hasOptionalPhrase: matched != nil,
-            matchedOptionalPhrase: matched,
-            passed: passed
-        )
+        SoftValidationResult(ParakeetTranscriptValidation.softValidate(transcript: transcript))
     }
 
     private static func printValidation(_ validation: SoftValidationResult) {
@@ -218,20 +211,6 @@ enum ParakeetSmokeTestRunner {
             print("matched_optional_phrase: \(matched)")
         }
         print("validation_passed: \(validation.passed)")
-    }
-
-    private static func normalize(_ text: String) -> String {
-        let lowered = text.lowercased()
-        let scalars = lowered.unicodeScalars.map { scalar -> Character in
-            if CharacterSet.alphanumerics.contains(scalar) || scalar == " " {
-                return Character(scalar)
-            }
-            return " "
-        }
-        let joined = String(scalars)
-        return joined
-            .split(whereSeparator: { $0.isWhitespace })
-            .joined(separator: " ")
     }
 
     private static func formatBytes(_ bytes: UInt64) -> String {

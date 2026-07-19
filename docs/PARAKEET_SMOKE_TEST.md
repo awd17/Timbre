@@ -1,7 +1,9 @@
 # Parakeet smoke test (for developers only)
 
-This test shows that FluidAudio can download, store, load, and transcribe with the English Parakeet TDT 0.6B v2 Core ML model in this repository.  
-This test does not connect Parakeet to the menu-bar dictation app.
+This test shows that FluidAudio can download, store, load, and transcribe with the English Parakeet TDT 0.6B v2 Core ML model in this repository.
+
+For DEBUG opt-in Parakeet batch dictation inside the menu-bar app (including a fixture-through-app gate), see [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md).  
+This smoke CLI remains the file-only developer check and must keep working.
 
 ## Versions
 
