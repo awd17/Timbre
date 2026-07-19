@@ -234,6 +234,7 @@ enum ParakeetSmokeTestRunner {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
-        return formatter.string(fromByteCount: Int64(bytes))
+        let clamped = Int64(min(bytes, UInt64(Int64.max)))
+        return formatter.string(fromByteCount: clamped)
     }
 }
