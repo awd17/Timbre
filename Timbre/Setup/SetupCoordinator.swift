@@ -35,7 +35,6 @@ final class SetupCoordinator {
         self.microphone = microphone
         self.defaults = defaults
         self.featureEnabled = featureEnabled
-        modelManager.refreshAvailability()
         reconcileInitialStep()
     }
 
@@ -174,11 +173,7 @@ final class SetupCoordinator {
         case .downloading, .loading:
             step = .preparing
         case .installed, .loaded:
-            if defaults.bool(forKey: Self.dismissedReadyKey) {
-                step = .ready
-            } else {
-                step = .ready
-            }
+            step = .ready
         case .notInstalled, .checking:
             if defaults.bool(forKey: Self.completedWelcomeKey) {
                 step = .microphone

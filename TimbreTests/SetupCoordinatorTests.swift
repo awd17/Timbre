@@ -55,11 +55,24 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.shouldAutoPresent)
         XCTAssertNil(coordinator.menuActionTitle)
         XCTAssertNil(coordinator.menuStatusText)
+        XCTAssertEqual(model.refreshCallCount, 0)
+    }
+
+    func testInitializationRefreshesAvailabilityOnceWhenEnabled() {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        _ = SetupCoordinator(
+            modelManager: model,
+            microphone: FakeMicrophonePermission(),
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        XCTAssertEqual(model.refreshCallCount, 1)
     }
 
     func testMicGrantedStartsInstall() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        model.delayNanoseconds = 20_000_000
+        model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .granted
         let coordinator = SetupCoordinator(
@@ -70,11 +83,12 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 5_000_000)
+        await model.waitForInstallStart()
         XCTAssertEqual(coordinator.step, .preparing)
-
-        try? await Task.sleep(nanoseconds: 50_000_000)
         XCTAssertEqual(model.ensureInstalledCallCount, 1)
+
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(coordinator.step, .ready)
         XCTAssertEqual(model.state, .installed)
     }
@@ -91,7 +105,7 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        await waitUntil { coordinator.step == .microphoneDenied }
 
         XCTAssertEqual(coordinator.step, .microphoneDenied)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
@@ -108,20 +122,20 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitUntil { coordinator.step == .microphoneDenied }
 
         XCTAssertEqual(mic.requestCallCount, 1)
         XCTAssertEqual(coordinator.step, .microphoneDenied)
 
         coordinator.retryMicrophone()
-        try? await Task.sleep(nanoseconds: 10_000_000)
+        await waitUntil { mic.requestCallCount == 2 }
         XCTAssertEqual(mic.requestCallCount, 2)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
     func testSingleFlightInstallFromCoordinator() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        model.delayNanoseconds = 40_000_000
+        model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .granted)
         let coordinator = SetupCoordinator(
             modelManager: model,
@@ -131,13 +145,17 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 5_000_000)
-        // Second path while preparing should join, not double-start from coordinator's hasStartedInstall.
+        await model.waitForInstallStart()
+        // A second request while preparing should join the fake's in-flight operation.
         coordinator.retryAfterFailure()
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        await waitUntil { model.ensureInstalledCallCount == 2 }
+
+        XCTAssertEqual(model.installOperationCount, 1)
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
 
         XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertGreaterThanOrEqual(model.ensureInstalledCallCount, 1)
+        XCTAssertEqual(model.ensureInstalledCallCount, 2)
     }
 
     func testRetryAfterFailure() async {
@@ -158,11 +176,11 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 30_000_000)
+        await waitUntil { coordinator.step == .failed }
         XCTAssertEqual(coordinator.step, .failed)
 
         coordinator.retryAfterFailure()
-        try? await Task.sleep(nanoseconds: 30_000_000)
+        await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(coordinator.step, .ready)
         XCTAssertEqual(model.state, .installed)
     }
@@ -256,7 +274,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testWindowCloseDoesNotCancelInstall() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        model.delayNanoseconds = 50_000_000
+        model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .granted)
         let coordinator = SetupCoordinator(
             modelManager: model,
@@ -266,10 +284,11 @@ final class SetupCoordinatorTests: XCTestCase {
         )
 
         coordinator.continueFromWelcome()
-        try? await Task.sleep(nanoseconds: 5_000_000)
+        await model.waitForInstallStart()
         XCTAssertEqual(coordinator.step, .preparing)
         coordinator.markWindowVisible(false)
-        try? await Task.sleep(nanoseconds: 80_000_000)
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(model.state, .installed)
         XCTAssertEqual(coordinator.step, .ready)
     }
@@ -279,10 +298,14 @@ final class SetupCoordinatorTests: XCTestCase {
 final class FakeParakeetModelManagerSingleFlightTests: XCTestCase {
     func testConcurrentEnsureInstalledSharesOneOperation() async throws {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        model.delayNanoseconds = 30_000_000
+        model.suspendsInstallation = true
 
         async let first: Void = model.ensureInstalled()
         async let second: Void = model.ensureInstalled()
+        await model.waitForInstallStart()
+        await waitUntil { model.ensureInstalledCallCount == 2 }
+        XCTAssertEqual(model.installOperationCount, 1)
+        model.resumeInstallation()
         try await first
         try await second
 
@@ -295,6 +318,13 @@ final class FakeParakeetModelManagerSingleFlightTests: XCTestCase {
         try await model.ensureInstalled()
         XCTAssertEqual(model.state, .installed)
         XCTAssertFalse(model.state.isLoaded)
+    }
+}
+
+@MainActor
+private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
+    while !condition() {
+        await Task.yield()
     }
 }
 

@@ -7,13 +7,17 @@ final class FakeParakeetModelManager: ParakeetModelManaging {
     private(set) var state: ModelPreparationState
     private(set) var progress: ModelPreparationProgress = .idle
     private(set) var ensureInstalledCallCount = 0
+    private(set) var installOperationCount = 0
     private(set) var unloadCallCount = 0
     private(set) var refreshCallCount = 0
 
     var ensureInstalledHandler: (() async throws -> Void)?
-    var delayNanoseconds: UInt64 = 0
+    var suspendsInstallation = false
 
     private var installTask: Task<Void, Error>?
+    private var installStartWaiters: [CheckedContinuation<Void, Never>] = []
+    private var installationGate: CheckedContinuation<Void, Never>?
+    private var installationMayProceed = false
 
     init(initialState: ModelPreparationState = .notInstalled) {
         self.state = initialState
@@ -32,14 +36,25 @@ final class FakeParakeetModelManager: ParakeetModelManaging {
         }
 
         let task = Task<Void, Error> { @MainActor in
+            self.installOperationCount += 1
             self.state = .downloading
             self.progress = ModelPreparationProgress(
                 fraction: 0.1,
                 detail: "Downloading…",
                 estimatedSecondsRemaining: 120
             )
-            if self.delayNanoseconds > 0 {
-                try await Task.sleep(nanoseconds: self.delayNanoseconds)
+            let waiters = self.installStartWaiters
+            self.installStartWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+
+            if self.suspendsInstallation {
+                if self.installationMayProceed {
+                    self.installationMayProceed = false
+                } else {
+                    await withCheckedContinuation { continuation in
+                        self.installationGate = continuation
+                    }
+                }
             }
             if let handler = self.ensureInstalledHandler {
                 try await handler()
@@ -57,6 +72,24 @@ final class FakeParakeetModelManager: ParakeetModelManaging {
             state = .failed(message: "Something went wrong while getting Timbre ready.")
             progress = .idle
             throw error
+        }
+    }
+
+    func waitForInstallStart() async {
+        if installOperationCount > 0 {
+            return
+        }
+        await withCheckedContinuation { continuation in
+            installStartWaiters.append(continuation)
+        }
+    }
+
+    func resumeInstallation() {
+        if let installationGate {
+            self.installationGate = nil
+            installationGate.resume()
+        } else {
+            installationMayProceed = true
         }
     }
 

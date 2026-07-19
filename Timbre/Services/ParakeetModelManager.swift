@@ -67,6 +67,7 @@ final class ParakeetModelManager: ParakeetModelManaging {
             TimbreLog.line("Timbre model: ensureInstalled joining in-flight load, then releasing.")
             do {
                 _ = try await loadTask.value
+                self.loadTask = nil
             } catch {
                 self.loadTask = nil
             }
