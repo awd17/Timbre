@@ -114,7 +114,7 @@ enum ParakeetSmokeTestRunner {
                 userInfo: [NSLocalizedDescriptionKey: "expected mono (1 channel) audio"]
             )
         }
-        guard lower.contains("16000 hz") else {
+        guard lower.contains("16000") && lower.contains("hz") else {
             throw NSError(
                 domain: "ParakeetSmokeTest",
                 code: 1,
