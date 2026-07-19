@@ -129,7 +129,11 @@ enum ParakeetSmokeTestRunner {
             )
         }
 
-        if let duration = parseEstimatedDuration(from: output), duration <= 0 {
+        guard let duration = parseEstimatedDuration(from: output) else {
+            print("warning: could not parse estimated duration from afinfo output; skipping zero-duration check")
+            return
+        }
+        guard duration > 0 else {
             throw NSError(
                 domain: "ParakeetSmokeTest",
                 code: 1,
