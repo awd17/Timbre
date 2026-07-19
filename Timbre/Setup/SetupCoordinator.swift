@@ -120,14 +120,10 @@ final class SetupCoordinator {
         let state = modelManager.state
 
         if !microphoneGranted, state.isInstalled || state == .loading {
-            switch microphone.status {
-            case .denied:
+            if microphone.status == .denied {
                 return "Microphone access required"
-            case .undetermined:
-                return "Microphone permission needed"
-            case .granted:
-                break
             }
+            return "Microphone permission needed"
         }
 
         switch state {
@@ -228,14 +224,7 @@ final class SetupCoordinator {
 
         // Mic revoked after ready → route back to recovery.
         if modelManager.state.isInstalled, !microphoneGranted {
-            switch microphone.status {
-            case .denied:
-                step = .microphoneDenied
-            case .undetermined:
-                step = .microphone
-            case .granted:
-                break
-            }
+            step = microphone.status == .denied ? .microphoneDenied : .microphone
             return
         }
 
@@ -311,7 +300,7 @@ final class SetupCoordinator {
 
     private func reconcileIfModelAlreadyReady() {
         if modelManager.state.isInstalled, microphoneGranted,
-           step == .preparing || step == .failed || step == .microphoneDenied
+           step == .preparing || step == .failed
         {
             step = .ready
         }

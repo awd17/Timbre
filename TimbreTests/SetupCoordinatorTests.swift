@@ -387,6 +387,29 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.refreshCallCount, 1)
     }
 
+    func testReturningUserConstructionRequestsMicAndContinuesInstall() async {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        model.suspendsInstallation = true
+        let mic = FakeMicrophonePermission(status: .undetermined)
+        mic.statusAfterRequest = .granted
+
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        await model.waitForInstallStart()
+        XCTAssertEqual(mic.requestCallCount, 1)
+        XCTAssertEqual(model.ensureInstalledCallCount, 1)
+        XCTAssertEqual(coordinator.step, .preparing)
+
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
+    }
+
     func testWindowCloseDoesNotCancelInstall() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
