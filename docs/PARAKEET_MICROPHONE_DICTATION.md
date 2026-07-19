@@ -36,13 +36,18 @@ Backend selection is centralized in `TranscriptionBackendSelection`.
 
 ## Model preparation
 
-- Uses `AsrModels.downloadAndLoad(version: .v2)` (same as the smoke CLI).
+Shared `ParakeetModelManager` owns the lifecycle:
+
+- Cache probe: `AsrModels.modelsExist` / `defaultCacheDirectory(for: .v2)`
+- Download/load: `AsrModels.downloadAndLoad(version: .v2)`
 - Cache: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
-- First Start may download/load/compile (can take tens of seconds). UI shows **Preparing...**
-- Later sessions reuse the loaded `AsrManager` (no re-download when cache is warm).
+- Dictation calls `ensureLoaded()` and **retains** `AsrManager` across sessions.
+- DEBUG first-run setup (when gated on) calls `ensureInstalled()`: verify then **release** memory so Apple Speech builds do not keep Parakeet resident after setup.
 - Cancelling a dictation session does **not** cancel shared model preparation.
 
 Requires Apple Silicon.
+
+See [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md).
 
 ## Fixture gate (Checkpoint 2)
 
@@ -90,9 +95,10 @@ Timbre maps shorter captures to `TranscriptionError.emptyResult` (no clipboard w
 - DEBUG opt-in only; not the production default
 - Batch after Stop only (no live partials, streaming, VAD, or auto-stop)
 - FluidAudio is linked into the Timbre app target for both Debug and Release in this milestone so the DEBUG Parakeet path can share the same package pin. Release builds never select Parakeet at runtime, but the Release binary still links FluidAudio (observed via linked symbols). Accept that link cost for now; gating the dependency by configuration is a follow-up.
-- No user-facing download progress / model settings UI
+- First-run setup / install UI is DEBUG-gated; not shown automatically in Release
 
 ## Related
 
 - Smoke CLI (file-only): [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md)
+- Setup / model management: [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md)
 - Project status: [`PROJECT_STATUS.md`](PROJECT_STATUS.md)

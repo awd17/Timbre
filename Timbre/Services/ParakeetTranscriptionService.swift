@@ -5,21 +5,23 @@ import Foundation
 /// DEBUG-only Parakeet v2 batch transcription via FluidAudio.
 @MainActor
 final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHandling {
-    private static let modelVersion: AsrModelVersion = .v2
     private static let targetSampleRate = 16_000.0
 
     private let audioSource: any ParakeetAudioSource
+    private let modelManager: ParakeetModelManager
     private var session: TranscriptionSession?
-    private var asrManager: AsrManager?
-    private var preparationTask: Task<AsrManager, Error>?
     private var inferenceTask: Task<ASRResult, Error>?
 
-    init(audioSource: any ParakeetAudioSource) {
+    init(audioSource: any ParakeetAudioSource, modelManager: ParakeetModelManager) {
         self.audioSource = audioSource
+        self.modelManager = modelManager
     }
 
-    convenience init(fixtureURL: URL) {
-        self.init(audioSource: ParakeetFixtureAudioSource(url: fixtureURL))
+    convenience init(fixtureURL: URL, modelManager: ParakeetModelManager) {
+        self.init(
+            audioSource: ParakeetFixtureAudioSource(url: fixtureURL),
+            modelManager: modelManager
+        )
     }
 
     static func defaultFixtureURL() -> URL? {
@@ -31,7 +33,7 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         throw TranscriptionError.recognitionFailed("Parakeet models require Apple Silicon.")
 #endif
         try await audioSource.prepareAccess()
-        _ = try await ensureAsrManager()
+        _ = try await modelManager.ensureLoaded()
     }
 
     func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
@@ -102,7 +104,7 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
             throw TranscriptionError.emptyResult
         }
 
-        let manager = try await ensureAsrManager()
+        let manager = try await modelManager.ensureLoaded()
         let transcriptionStarted = Date()
         let task = Task<ASRResult, Error> {
             var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
@@ -139,57 +141,6 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
             throw TranscriptionError.emptyResult
         }
         return trimmed
-    }
-
-    // MARK: - Model lifecycle
-
-    private func ensureAsrManager() async throws -> AsrManager {
-        if let asrManager {
-            TimbreLog.line("Timbre Parakeet: reusing loaded AsrManager.")
-            return asrManager
-        }
-
-        if let preparationTask {
-            TimbreLog.line("Timbre Parakeet: awaiting in-flight model preparation.")
-            do {
-                let manager = try await preparationTask.value
-                asrManager = manager
-                return manager
-            } catch {
-                TimbreLog.line(
-                    "Timbre Parakeet: in-flight model preparation failed, retrying — \(error.localizedDescription)"
-                )
-                self.preparationTask = nil
-                asrManager = nil
-            }
-        }
-
-        let cacheDirectory = AsrModels.defaultCacheDirectory(for: Self.modelVersion)
-        let modelsAvailable = AsrModels.modelsExist(at: cacheDirectory, version: Self.modelVersion)
-        TimbreLog.line(
-            "Timbre Parakeet: preparing models version=v2 cache=\(cacheDirectory.path) exists=\(modelsAvailable)"
-        )
-
-        let started = Date()
-        let task = Task<AsrManager, Error> {
-            let models = try await AsrModels.downloadAndLoad(version: Self.modelVersion)
-            return AsrManager(config: .default, models: models)
-        }
-        preparationTask = task
-
-        do {
-            let manager = try await task.value
-            asrManager = manager
-            let duration = Date().timeIntervalSince(started)
-            TimbreLog.line("Timbre Parakeet: model ready in \(String(format: "%.3f", duration))s")
-            return manager
-        } catch {
-            preparationTask = nil
-            asrManager = nil
-            throw TranscriptionError.recognitionFailed(
-                "Parakeet model preparation failed: \(error.localizedDescription)"
-            )
-        }
     }
 
     // MARK: - Teardown
