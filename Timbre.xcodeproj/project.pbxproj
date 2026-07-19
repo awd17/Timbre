@@ -218,8 +218,8 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				97EC226F300C275500E4A542 /* Timbre */,
 				97516C8A300C600100000001 /* Shared */,
+				97EC226F300C275500E4A542 /* Timbre */,
 			);
 			name = Timbre;
 			packageProductDependencies = (

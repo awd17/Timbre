@@ -7,7 +7,13 @@ struct TimbreApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDictationView(controller: appDelegate.controller)
+            MenuBarDictationView(
+                controller: appDelegate.controller,
+                setupCoordinator: appDelegate.setupCoordinator,
+                onOpenSetup: {
+                    appDelegate.presentSetupWindow()
+                }
+            )
         } label: {
             Label("Timbre", systemImage: "waveform")
         }
@@ -18,11 +24,32 @@ struct TimbreApp: App {
 @MainActor
 final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let controller: AssistantController
+    let modelManager: ParakeetModelManager
+    let setupCoordinator: SetupCoordinator?
 
     private var debugWindow: NSWindow?
+    private var setupWindowController: SetupWindowController?
 
     override init() {
-        controller = AssistantController(transcription: Self.makeTranscriptionService())
+        let modelManager = ParakeetModelManager()
+        self.modelManager = modelManager
+
+        let arguments = ProcessInfo.processInfo.arguments
+        let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments)
+
+        if setupEnabled {
+            setupCoordinator = SetupCoordinator(
+                modelManager: modelManager,
+                microphone: MicrophonePermissionService(),
+                featureEnabled: true
+            )
+        } else {
+            setupCoordinator = nil
+        }
+
+        controller = AssistantController(
+            transcription: Self.makeTranscriptionService(modelManager: modelManager)
+        )
         super.init()
     }
 
@@ -32,6 +59,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.setActivationPolicy(.regular)
         }
         #endif
+        if setupCoordinator?.shouldAutoPresent == true {
+            NSApp.setActivationPolicy(.regular)
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -42,6 +72,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             controller: controller
         )
         #endif
+
+        if let setupCoordinator, setupCoordinator.shouldAutoPresent {
+            presentSetupWindow()
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -49,7 +83,25 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
-    private static func makeTranscriptionService() -> any TranscriptionServicing {
+    func presentSetupWindow() {
+        guard let setupCoordinator else { return }
+        if setupWindowController == nil {
+            setupWindowController = SetupWindowController(
+                coordinator: setupCoordinator,
+                shouldRestoreAccessory: { [weak self] in
+                    #if DEBUG
+                    if Self.wantsDebugWindow { return false }
+                    #endif
+                    return self?.debugWindow?.isVisible != true
+                }
+            )
+        }
+        setupWindowController?.present()
+    }
+
+    private static func makeTranscriptionService(
+        modelManager: ParakeetModelManager
+    ) -> any TranscriptionServicing {
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         let resolution = TranscriptionBackendSelection.resolve(arguments: arguments, isDebug: true)
@@ -67,14 +119,20 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             if TranscriptionBackendSelection.wantsParakeetFixture(arguments: arguments, isDebug: true) {
                 if let fixtureURL = ParakeetTranscriptionService.defaultFixtureURL() {
                     TimbreLog.line("Timbre Parakeet: using fixture \(fixtureURL.path)")
-                    return ParakeetTranscriptionService(fixtureURL: fixtureURL)
+                    return ParakeetTranscriptionService(
+                        fixtureURL: fixtureURL,
+                        modelManager: modelManager
+                    )
                 }
                 TimbreLog.line(
                     "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; falling back to Apple Speech."
                 )
                 return SpeechRecognitionService()
             }
-            return ParakeetTranscriptionService(audioSource: ParakeetMicrophoneAudioSource())
+            return ParakeetTranscriptionService(
+                audioSource: ParakeetMicrophoneAudioSource(),
+                modelManager: modelManager
+            )
         case .appleSpeech:
             return SpeechRecognitionService()
         }
@@ -99,8 +157,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         window.title = "Timbre Debug"
         window.contentView = NSHostingView(
-            rootView: MenuBarDictationView(controller: controller)
-                .frame(minWidth: 320, minHeight: 220)
+            rootView: MenuBarDictationView(
+                controller: controller,
+                setupCoordinator: nil,
+                onOpenSetup: nil
+            )
+            .frame(minWidth: 320, minHeight: 220)
         )
         window.center()
         window.makeKeyAndOrderFront(nil)

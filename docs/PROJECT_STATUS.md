@@ -37,12 +37,15 @@ The UI and the controller do not depend on a specific speech engine.
 - Parakeet / FluidAudio model download, load, and file-transcription smoke CLI
 - **DEBUG opt-in Parakeet batch microphone dictation** via `--parakeet-transcription` (`ParakeetTranscriptionService`)
 - Fixture-through-app gate via `--parakeet-fixture` (service → controller → clipboard)
+- **Shared `ParakeetModelManager`** with installed vs loaded states (`ensureInstalled` / `ensureLoaded`)
+- **DEBUG-gated first-run setup** (welcome → mic → download/verify → ready); Release auto-setup remains off
 
 ### Not started / out of this milestone
 
 - Parakeet as the **default** production engine
+- Removing the setup feature gate for Release
 - Live Parakeet partial transcription / streaming / VAD / auto-stop
-- User-facing model download progress or settings
+- Full Settings screen / user model controls
 - Global keyboard shortcuts
 - Floating panel
 - Paste into the focused app
@@ -51,6 +54,7 @@ The UI and the controller do not depend on a specific speech engine.
 - Assistant mode and CUA
 - Accounts and billing
 - DMG packaging, Developer ID signing, and notarization
+- macOS “Timbre is ready” notifications
 
 ## Architecture
 
@@ -58,10 +62,11 @@ The app is small and layered.
 
 ### Layers
 
-1. Views call `AssistantController`.
+1. Views call `AssistantController` (dictation) and optionally `SetupCoordinator` (first-run).
 2. `AssistantController` owns the session workflow.
 3. Transcription uses `TranscriptionServicing`.
 4. Clipboard uses `ClipboardServicing`.
+5. `ParakeetModelManager` owns model install/load; setup and DEBUG Parakeet share it.
 
 Backends:
 
@@ -72,7 +77,7 @@ Backends:
 Views must not import FluidAudio, AVFoundation, Core ML, or `AsrManager`.
 
 FluidAudio 0.15.5 is linked to both the **Timbre** app target and **ParakeetSmokeTest**.  
-Runtime Parakeet selection is DEBUG-only; linking may still affect Release binary size (not claimed as zero without measurement).
+Runtime Parakeet selection is DEBUG-only; automatic setup is DEBUG-gated. Release does not auto-download the model in this milestone.
 
 ### Session model
 
@@ -98,8 +103,17 @@ Timbre/
     SpeechRecognitionService.swift
     MockTranscriptionService.swift
     ParakeetTranscriptionService.swift  DEBUG only
+    ParakeetModelManaging.swift
+    ParakeetModelManager.swift
+    ModelPreparationState.swift
+    MicrophonePermissionProviding.swift
     ClipboardServicing.swift
     ClipboardService.swift
+  Setup/
+    TimbreSetupFeature.swift      DEBUG/Release gate
+    SetupCoordinator.swift
+    SetupWindowController.swift
+    SetupFlowView.swift
   Fixtures/parakeet-smoke-test.wav
   Views/MenuBarDictationView.swift
 Tools/ParakeetSmokeTest/
@@ -108,6 +122,7 @@ Tools/ParakeetSmokeTest/
 scripts/run-parakeet-smoke.sh
 docs/PARAKEET_SMOKE_TEST.md
 docs/PARAKEET_MICROPHONE_DICTATION.md
+docs/SETUP_AND_MODEL_MANAGEMENT.md
 TimbreTests/
 TimbreUITests/
 ```
@@ -119,6 +134,8 @@ TimbreUITests/
 - Prefer changes to `SessionState` over new controller flags.
 - Keep mock transcription, Parakeet selection, and the debug window inside `#if DEBUG`.
 - Release builds must use `SpeechRecognitionService` until a later task changes the engine.
+- Keep automatic setup gated off in Release until Parakeet becomes the default.
+- Distinguish installed (on disk) from loaded (`AsrManager` retained).
 - Keep the Parakeet smoke CLI working when changing FluidAudio usage.
 - Keep permission strings in the Xcode target Info settings.
 - Keep App Sandbox off unless a later task requires it.
@@ -131,7 +148,7 @@ Do not start these items unless a task asks for them:
 - Live Parakeet partials / streaming ASR
 - Hotkeys
 - Accessibility paste
-- Settings screens
+- Full Settings screens
 - Authentication
 - Billing
 - Packaging and notarization
@@ -146,10 +163,12 @@ Do not start these items unless a task asks for them:
 6. The project hardened concurrency with `@MainActor` and session tokens.
 7. The project added a developer CLI for Parakeet / FluidAudio file transcription.
 8. The project added DEBUG opt-in Parakeet batch microphone dictation in the app.
+9. The project added gated first-run setup and a shared Parakeet model manager (installed vs loaded).
 
 ## Related docs
 
 - Local setup and commands: `README.md`
 - Parakeet smoke test: `docs/PARAKEET_SMOKE_TEST.md`
 - Parakeet app mic path: `docs/PARAKEET_MICROPHONE_DICTATION.md`
+- Setup / model management: `docs/SETUP_AND_MODEL_MANAGEMENT.md`
 - Repository: https://github.com/awd17/Timbre

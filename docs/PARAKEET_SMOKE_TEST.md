@@ -97,16 +97,13 @@ Do not use a FluidAudio cache API for this step. This document does not describe
 ## Isolation from Timbre.app
 
 - `ParakeetSmokeTest` is a separate macOS command-line target.
-- Only that target links FluidAudio.
+- Both `ParakeetSmokeTest` and the Timbre app link FluidAudio 0.15.5 (shared pin).
 - The Timbre scheme does not build or archive `ParakeetSmokeTest`.
-- `otool -L` on `Timbre.app` does not show a FluidAudio library.
-- `nm` on `Timbre.app` does not show FluidAudio or Parakeet symbols.
 - Timbre unit tests do not download models.
+- The app’s shared `ParakeetModelManager` is separate from this CLI; the smoke target remains an independent file-transcription check.
 
 Xcode can still resolve the FluidAudio package when you open or build the project.  
-That occurs because the package reference is at the project level.  
-The Timbre app does not link FluidAudio.  
-The Timbre app does not run FluidAudio.
+That occurs because the package reference is at the project level.
 
 ## License and credit
 
@@ -115,11 +112,10 @@ The Timbre app does not run FluidAudio.
 
 ## Work that is not in this task
 
-- Parakeet microphone capture
+- Parakeet microphone capture (see `PARAKEET_MICROPHONE_DICTATION.md`)
 - Live or partial Parakeet transcription
-- Parakeet support for `TranscriptionServicing`
 - Replacement of Apple Speech in the default app path
-- Onboarding or download progress UI
+- Release automatic onboarding (DEBUG-gated; see `SETUP_AND_MODEL_MANAGEMENT.md`)
 - Model selection, settings, hotkeys, text insertion, or LLM features
 
 ## If the test fails
