@@ -138,7 +138,7 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         guard !trimmed.isEmpty else {
             throw TranscriptionError.emptyResult
         }
-        return result.text
+        return trimmed
     }
 
     // MARK: - Model lifecycle
@@ -156,6 +156,9 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
                 asrManager = manager
                 return manager
             } catch {
+                TimbreLog.line(
+                    "Timbre Parakeet: in-flight model preparation failed, retrying — \(error.localizedDescription)"
+                )
                 self.preparationTask = nil
                 asrManager = nil
             }

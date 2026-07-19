@@ -79,7 +79,6 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             return SpeechRecognitionService()
         }
         #else
-        TimbreLog.line("Timbre transcription backend: appleSpeech")
         return SpeechRecognitionService()
         #endif
     }

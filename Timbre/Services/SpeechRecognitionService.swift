@@ -159,7 +159,7 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
         guard !trimmed.isEmpty else {
             throw TranscriptionError.emptyResult
         }
-        return text
+        return trimmed
     }
 
     func cancel() async {
