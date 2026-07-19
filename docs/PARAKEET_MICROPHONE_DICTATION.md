@@ -1,38 +1,48 @@
-# Parakeet microphone dictation (DEBUG)
+# Parakeet microphone dictation
 
-Opt-in batch Parakeet v2 dictation in the Timbre menu-bar app via FluidAudio 0.15.5.
+Production Parakeet v2 batch dictation in the Timbre menu-bar app via FluidAudio 0.15.5.
 
-Apple Speech remains the default engine. Live Parakeet partials are **not** implemented.
+Live Parakeet partials are **not** implemented. After Stop, Timbre runs local inference and copies the transcript.
 
-## Launch arguments (DEBUG only)
+## Launch arguments
 
 | Argument | Effect |
 |----------|--------|
-| *(none)* | Apple Speech + microphone |
-| `--mock-transcription` | Fake transcript (no mic). Wins if combined with `--parakeet-transcription`. |
-| `--parakeet-transcription` | Parakeet v2 batch transcription after Stop |
-| `--parakeet-fixture` | With `--parakeet-transcription`: run the committed WAV through the full app path (service → controller → clipboard). No microphone. |
-| `--debug-window` | Opens the Timbre Debug window |
+| *(none)* | **Parakeet** + microphone (Debug and Release default) |
+| `--mock-transcription` | Debug only. Fake transcript (no mic). Disables setup. |
+| `--apple-speech` | Debug only. Apple Speech comparison backend. Disables Parakeet setup. |
+| `--parakeet-fixture` | Debug only. Run the committed WAV through the full app path (no mic). Disables setup. |
+| `--parakeet-transcription` | Deprecated no-op; Parakeet is already the default (logged once). |
+| `--debug-window` | Debug only. Opens the Timbre Debug window |
+| `--disable-setup` | Debug only. Disables automatic first-run setup |
 
-Release builds always use Apple Speech and ignore these flags.
+Release builds ignore DEBUG-only flags and always use Parakeet with setup enabled when needed.
 
 ### Examples
 
 ```bash
-# Path depends on DerivedData
-Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-transcription
+# Path depends on DerivedData — normal production path (no flags)
+Timbre.app/Contents/MacOS/Timbre
 
 # Deterministic app-path gate (no speaking required)
-Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-transcription --parakeet-fixture
+Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-fixture
+
+# Apple Speech comparison (DEBUG)
+Timbre.app/Contents/MacOS/Timbre --debug-window --apple-speech
 ```
 
 Backend selection is centralized in `TranscriptionBackendSelection`.
 
 ## Backend selection priority (DEBUG)
 
-1. `--mock-transcription` → mock (explicit priority over Parakeet)
-2. `--parakeet-transcription` → Parakeet
-3. else → Apple Speech
+1. `--parakeet-fixture` → Parakeet (fixture audio source)
+2. `--mock-transcription` → mock
+3. `--apple-speech` → Apple Speech
+4. else → Parakeet default
+
+Release always resolves to Parakeet.
+
+There is **no silent fallback** to Apple Speech when Parakeet setup, loading, or transcription fails.
 
 ## Model preparation
 
@@ -41,22 +51,23 @@ Shared `ParakeetModelManager` owns the lifecycle:
 - Cache probe: `AsrModels.modelsExist` / `defaultCacheDirectory(for: .v2)`
 - Download/load: `AsrModels.downloadAndLoad(version: .v2)`
 - Cache: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
-- Dictation calls `ensureLoaded()` and **retains** `AsrManager` across sessions.
-- DEBUG first-run setup (when gated on) calls `ensureInstalled()`: verify then **release** memory so Apple Speech builds do not keep Parakeet resident after setup.
+- Constructing the manager/service at launch does **not** download or load the model.
+- Setup calls `ensureInstalled()`: verify then **release** memory.
+- Dictation `prepare()` calls `ensureLoaded()` and **retains** `AsrManager` across sessions.
 - Cancelling a dictation session does **not** cancel shared model preparation.
 
 Requires Apple Silicon.
 
 See [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md).
 
-## Fixture gate (Checkpoint 2)
+## Fixture gate
 
-Before relying on microphone capture, verify:
+Before relying on microphone capture, verify (DEBUG):
 
 ```bash
 xcodebuild -scheme Timbre -destination 'platform=macOS' -derivedDataPath .derivedData/Timbre build
 .derivedData/Timbre/Build/Products/Debug/Timbre.app/Contents/MacOS/Timbre \
-  --debug-window --parakeet-transcription --parakeet-fixture
+  --debug-window --parakeet-fixture
 ```
 
 Look for `Timbre Parakeet fixture: PASS` in the console. Soft checks match the smoke fixture (non-empty; contains `quick brown fox`, `lazy dog`, and one of `timbre` / `smoke test` / `parakeet`).
@@ -65,13 +76,14 @@ The fixture WAV is bundled from `Timbre/Fixtures/parakeet-smoke-test.wav` (copy 
 
 ## Microphone dictation flow
 
-1. Start → Preparing (mic permission + model readiness)
+1. Start → Preparing (mic permission + `ensureLoaded()`)
 2. Listening (no live transcript text)
 3. Stop → Processing (convert snapshot → Parakeet inference)
 4. Completed → transcript copied to clipboard
 5. Copy Again works as usual
+6. A second Start reuses the loaded manager (no redownload)
 
-Permissions: **microphone only** (no Speech Recognition authorization on this path).
+Permissions: **microphone only** (no Speech Recognition authorization on the production path).
 
 Capture uses `AVAudioEngine` with a serial queue for converted mono Float32 @ 16 kHz samples. On Stop: remove tap → stop engine → drain queue → immutable snapshot → clear → transcribe.
 
@@ -92,10 +104,10 @@ Timbre maps shorter captures to `TranscriptionError.emptyResult` (no clipboard w
 
 ## Limitations
 
-- DEBUG opt-in only; not the production default
 - Batch after Stop only (no live partials, streaming, VAD, or auto-stop)
-- FluidAudio is linked into the Timbre app target for both Debug and Release in this milestone so the DEBUG Parakeet path can share the same package pin. Release builds never select Parakeet at runtime, but the Release binary still links FluidAudio (observed via linked symbols). Accept that link cost for now; gating the dependency by configuration is a follow-up.
-- First-run setup / install UI is DEBUG-gated; not shown automatically in Release
+- Apple Silicon required
+- First model download is large (~464 MB)
+- No global shortcut, floating panel, or focused-app paste yet
 
 ## Related
 

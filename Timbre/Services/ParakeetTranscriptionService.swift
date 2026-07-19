@@ -1,8 +1,7 @@
-#if DEBUG
 import FluidAudio
 import Foundation
 
-/// DEBUG-only Parakeet v2 batch transcription via FluidAudio.
+/// Production Parakeet v2 batch transcription via FluidAudio.
 @MainActor
 final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHandling {
     private static let targetSampleRate = 16_000.0
@@ -153,4 +152,3 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         audioSource.teardown()
     }
 }
-#endif

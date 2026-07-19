@@ -78,6 +78,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        setupCoordinator?.applicationDidBecomeActive()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         controller.prepareForTermination()
         return .terminateNow
@@ -99,24 +103,51 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         setupWindowController?.present()
     }
 
+    /// Constructs the transcription backend without requesting microphone permission,
+    /// downloading files, or loading the model into memory.
     private static func makeTranscriptionService(
         modelManager: ParakeetModelManager
     ) -> any TranscriptionServicing {
-        #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
-        let resolution = TranscriptionBackendSelection.resolve(arguments: arguments, isDebug: true)
-        if resolution.conflictingFlagsIgnoredParakeet {
+#if DEBUG
+        let isDebug = true
+#else
+        let isDebug = false
+#endif
+        let resolution = TranscriptionBackendSelection.resolve(
+            arguments: arguments,
+            isDebug: isDebug
+        )
+
+        if resolution.deprecatedParakeetFlagPresent {
             TimbreLog.line(
-                "Timbre: both \(TranscriptionBackendSelection.mockArgument) and \(TranscriptionBackendSelection.parakeetArgument) set; using mock transcription."
+                "Timbre: \(TranscriptionBackendSelection.parakeetArgument) is deprecated; Parakeet is already the default."
+            )
+        }
+        if let winner = resolution.conflictWinner {
+            TimbreLog.line(
+                "Timbre: conflicting transcription flags; using \(winner.logName) priority (\(resolution.backend.logName))."
             )
         }
         TimbreLog.line("Timbre transcription backend: \(resolution.backend.logName)")
 
         switch resolution.backend {
         case .mock:
+#if DEBUG
             return MockTranscriptionService()
+#else
+            // Unreachable: Release resolve always returns .parakeet.
+            return ParakeetTranscriptionService(
+                audioSource: ParakeetMicrophoneAudioSource(),
+                modelManager: modelManager
+            )
+#endif
         case .parakeet:
-            if TranscriptionBackendSelection.wantsParakeetFixture(arguments: arguments, isDebug: true) {
+#if DEBUG
+            if TranscriptionBackendSelection.wantsParakeetFixture(
+                arguments: arguments,
+                isDebug: true
+            ) {
                 if let fixtureURL = ParakeetTranscriptionService.defaultFixtureURL() {
                     TimbreLog.line("Timbre Parakeet: using fixture \(fixtureURL.path)")
                     return ParakeetTranscriptionService(
@@ -125,20 +156,25 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     )
                 }
                 TimbreLog.line(
-                    "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; falling back to Apple Speech."
+                    "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; using microphone Parakeet (no Apple Speech fallback)."
                 )
-                return SpeechRecognitionService()
             }
+#endif
             return ParakeetTranscriptionService(
                 audioSource: ParakeetMicrophoneAudioSource(),
                 modelManager: modelManager
             )
         case .appleSpeech:
+#if DEBUG
             return SpeechRecognitionService()
+#else
+            // Unreachable: Release resolve always returns .parakeet.
+            return ParakeetTranscriptionService(
+                audioSource: ParakeetMicrophoneAudioSource(),
+                modelManager: modelManager
+            )
+#endif
         }
-        #else
-        return SpeechRecognitionService()
-        #endif
     }
 
     #if DEBUG

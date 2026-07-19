@@ -3,21 +3,47 @@ import Foundation
 import XCTest
 
 final class TranscriptionBackendSelectionTests: XCTestCase {
-    func testReleaseAlwaysSelectsAppleSpeech() {
+    func testReleaseAlwaysSelectsParakeet() {
         let resolution = TranscriptionBackendSelection.resolve(
             arguments: [
                 "--mock-transcription",
                 "--parakeet-transcription",
+                "--apple-speech",
+                "--parakeet-fixture",
+                "--disable-setup",
             ],
             isDebug: false
         )
-        XCTAssertEqual(resolution.backend, .appleSpeech)
-        XCTAssertFalse(resolution.conflictingFlagsIgnoredParakeet)
+        XCTAssertEqual(resolution.backend, .parakeet)
+        XCTAssertTrue(resolution.deprecatedParakeetFlagPresent)
+        XCTAssertNil(resolution.conflictWinner)
     }
 
-    func testDebugDefaultIsAppleSpeech() {
+    func testReleaseIgnoresDeveloperFlags() {
+        XCTAssertEqual(
+            TranscriptionBackendSelection.resolve(arguments: ["Timbre"], isDebug: false).backend,
+            .parakeet
+        )
+        XCTAssertEqual(
+            TranscriptionBackendSelection.resolve(
+                arguments: ["Timbre", "--apple-speech"],
+                isDebug: false
+            ).backend,
+            .parakeet
+        )
+        XCTAssertFalse(
+            TranscriptionBackendSelection.wantsParakeetFixture(
+                arguments: ["Timbre", "--parakeet-fixture"],
+                isDebug: false
+            )
+        )
+    }
+
+    func testDebugDefaultIsParakeet() {
         let resolution = TranscriptionBackendSelection.resolve(arguments: ["Timbre"], isDebug: true)
-        XCTAssertEqual(resolution.backend, .appleSpeech)
+        XCTAssertEqual(resolution.backend, .parakeet)
+        XCTAssertFalse(resolution.deprecatedParakeetFlagPresent)
+        XCTAssertNil(resolution.conflictWinner)
     }
 
     func testDebugMockArgument() {
@@ -26,55 +52,87 @@ final class TranscriptionBackendSelectionTests: XCTestCase {
             isDebug: true
         )
         XCTAssertEqual(resolution.backend, .mock)
-        XCTAssertFalse(resolution.conflictingFlagsIgnoredParakeet)
+        XCTAssertNil(resolution.conflictWinner)
     }
 
-    func testDebugParakeetArgument() {
+    func testDebugAppleSpeechArgument() {
+        let resolution = TranscriptionBackendSelection.resolve(
+            arguments: ["Timbre", "--apple-speech"],
+            isDebug: true
+        )
+        XCTAssertEqual(resolution.backend, .appleSpeech)
+    }
+
+    func testDeprecatedParakeetFlagDoesNotChangeDefault() {
         let resolution = TranscriptionBackendSelection.resolve(
             arguments: ["Timbre", "--parakeet-transcription"],
             isDebug: true
         )
         XCTAssertEqual(resolution.backend, .parakeet)
+        XCTAssertTrue(resolution.deprecatedParakeetFlagPresent)
     }
 
-    func testMockWinsOverParakeet() {
+    func testFixtureWinsOverMock() {
         let resolution = TranscriptionBackendSelection.resolve(
             arguments: [
                 "Timbre",
-                "--parakeet-transcription",
+                "--parakeet-fixture",
                 "--mock-transcription",
             ],
             isDebug: true
         )
-        XCTAssertEqual(resolution.backend, .mock)
-        XCTAssertTrue(resolution.conflictingFlagsIgnoredParakeet)
+        XCTAssertEqual(resolution.backend, .parakeet)
+        XCTAssertEqual(resolution.conflictWinner, .fixture)
     }
 
-    func testParakeetFixtureRequiresParakeetBackend() {
-        XCTAssertFalse(
+    func testMockWinsOverAppleSpeech() {
+        let resolution = TranscriptionBackendSelection.resolve(
+            arguments: [
+                "Timbre",
+                "--mock-transcription",
+                "--apple-speech",
+            ],
+            isDebug: true
+        )
+        XCTAssertEqual(resolution.backend, .mock)
+        XCTAssertEqual(resolution.conflictWinner, .mock)
+    }
+
+    func testFixtureWinsOverAppleSpeech() {
+        let resolution = TranscriptionBackendSelection.resolve(
+            arguments: [
+                "Timbre",
+                "--parakeet-fixture",
+                "--apple-speech",
+            ],
+            isDebug: true
+        )
+        XCTAssertEqual(resolution.backend, .parakeet)
+        XCTAssertEqual(resolution.conflictWinner, .fixture)
+    }
+
+    func testParakeetFixtureAloneSelectsFixturePath() {
+        XCTAssertTrue(
             TranscriptionBackendSelection.wantsParakeetFixture(
                 arguments: ["Timbre", "--parakeet-fixture"],
                 isDebug: true
             )
         )
+        // Fixture wins over mock, so the fixture path remains active.
         XCTAssertTrue(
             TranscriptionBackendSelection.wantsParakeetFixture(
                 arguments: [
                     "Timbre",
-                    "--parakeet-transcription",
                     "--parakeet-fixture",
+                    "--mock-transcription",
                 ],
                 isDebug: true
             )
         )
         XCTAssertFalse(
             TranscriptionBackendSelection.wantsParakeetFixture(
-                arguments: [
-                    "Timbre",
-                    "--parakeet-transcription",
-                    "--parakeet-fixture",
-                ],
-                isDebug: false
+                arguments: ["Timbre"],
+                isDebug: true
             )
         )
     }

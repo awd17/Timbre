@@ -2,14 +2,17 @@
 
 Developer documentation for Timbre’s first-run setup flow and shared Parakeet model lifecycle.
 
-## Status in this milestone
+## Status
 
-- Apple Speech remains the **default dictation engine** (Debug without flags, and all Release launches).
-- Automatic setup UI is **gated** by `TimbreSetupFeature` and is **off in Release**.
-- In DEBUG, setup is **on by default**, except when `--mock-transcription`, `--parakeet-fixture`, or `--disable-setup` is present.
-- The next PR should remove this gate when Parakeet becomes the production default.
+- **Parakeet is the default dictation engine** in Debug and Release.
+- Automatic setup UI is on whenever Timbre needs the Parakeet component or microphone access for production dictation.
+- In DEBUG, setup is **off** when `--mock-transcription`, `--parakeet-fixture`, `--apple-speech`, or `--disable-setup` is present.
+- Release **ignores** those developer bypass flags.
 
-Release users must not auto-download ~500 MB for a component the app does not yet use for dictation.
+Dictation readiness requires both:
+
+1. Model installed and valid on disk (or loaded in memory)
+2. Microphone permission granted
 
 ## Architecture
 
@@ -18,14 +21,16 @@ SetupFlowView / MenuBarDictationView
         → SetupCoordinator
               → MicrophonePermissionProviding
               → ParakeetModelManaging (ensureInstalled)
-ParakeetTranscriptionService (DEBUG)
-        → ParakeetModelManager.ensureLoaded()
+ParakeetTranscriptionService (production default)
+        → ParakeetModelManager.ensureLoaded()   # first Start only loads into memory
 ParakeetModelManager
         → FluidAudio AsrModels / AsrManager
         → on-disk cache (source of truth for “installed”)
 ```
 
 Views must not import FluidAudio.
+
+Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` must not request the microphone, download files, or load the model. Setup owns `ensureInstalled()`; the first Start owns `ensureLoaded()`.
 
 ### Installed vs loaded
 
@@ -39,20 +44,19 @@ Views must not import FluidAudio.
 | `failed` | Recoverable failure |
 
 - **Onboarding** calls `ensureInstalled()`: download → verify load → **release** manager → `installed`.
-- **DEBUG Parakeet dictation** calls `ensureLoaded()`: load (download if needed) and **retain** while useful.
-
-Do not keep a loaded `AsrManager` after onboarding while Apple Speech is still the active backend.
+- **Production Parakeet dictation** calls `ensureLoaded()`: load (download if needed) and **retain** while useful.
 
 ### Single-flight
 
-`ParakeetModelManager` shares one install task and one load task. Opening setup twice, or overlapping install with DEBUG dictation prepare, must not start competing downloads.
+`ParakeetModelManager` shares one install task and one load task. Opening setup twice, or overlapping install with dictation prepare, must not start competing downloads.
 
 Session cancel and closing the setup window do **not** cancel preparation.
 
 ### Dictation while setup is incomplete
 
-When the setup feature is enabled and the model is not yet installed (or is still downloading), the menu-bar popover shows a setup-only surface: no transcript, no Start. Open the setup window from **Finish Setup…** / **Getting Ready…**. After the component is installed, normal dictation controls return.
+When setup is enabled and the model is not installed, still downloading, or the microphone is not granted, the menu-bar popover shows a setup-only surface: no transcript, no Start. Open the setup window from **Finish Setup…** / **Getting Ready…** / **Setup Failed — Try Again…**. After the component is installed and the mic is granted, normal dictation controls return without relaunching.
 
+`applicationDidBecomeActive` refreshes cache and microphone status so revoke/re-grant and deleted caches update the menu while Timbre stays open.
 
 ```text
 Welcome → Microphone → Preparing → Ready
@@ -83,41 +87,41 @@ Model availability: `AsrModels.modelsExist` / successful verify via FluidAudio.
 
 Size is for developers only; setup UI does not show megabytes.
 
-## Reset for testing
+## Clean Release verification
+
+Use the **Release-built** `Timbre.app`, not a Debug binary with simulated Release selection.
 
 ```bash
+# Reset microphone TCC for this bundle
+tccutil reset Microphone com.augustdrakton.Timbre
+
+# Optional if clearing DEBUG Apple Speech leftovers
+tccutil reset SpeechRecognition com.augustdrakton.Timbre
+
 # Remove model cache
 rm -rf "$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
 
-# Clear setup prefs (bundle id)
+# Clear setup prefs
 defaults delete com.augustdrakton.Timbre
-# Or only setup keys:
-defaults delete com.augustdrakton.Timbre timbre.hasCompletedSetupWelcome
-defaults delete com.augustdrakton.Timbre timbre.hasDismissedSetupReady
+
+xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' build
+# Launch Build/Products/Release/Timbre.app with no arguments
 ```
 
-Launch DEBUG Timbre (setup on by default). Walk: Continue → grant mic → prepare → optionally close window → Ready → Done → quit → relaunch (no re-download).
+Walk: setup appears → grant mic (Speech Recognition must not appear) → prepare → optionally close window → Ready → Done → Start/Stop dictation → clipboard.  
+Pass DEBUG-only flags to the Release binary and confirm they do not change the backend or bypass setup.
 
-Force setup off:
+## DEBUG setup bypass
 
 ```bash
 Timbre.app/Contents/MacOS/Timbre --disable-setup
-# or
 Timbre.app/Contents/MacOS/Timbre --mock-transcription --debug-window
+Timbre.app/Contents/MacOS/Timbre --apple-speech --debug-window
+Timbre.app/Contents/MacOS/Timbre --parakeet-fixture --debug-window
 ```
-
-## What the next PR should change
-
-- Make Parakeet the normal production transcription backend.
-- Remove the `TimbreSetupFeature` Release/DEBUG gate (or turn it on for Release).
-- Route users to setup when the required download is unavailable.
-- Keep Apple Speech as a temporary fallback if desired.
-- Optionally add Settings model controls.
-
-Do not implement those in this milestone.
 
 ## Related
 
-- [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md) — DEBUG mic path uses `ensureLoaded()`
+- [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md) — production mic path uses `ensureLoaded()`
 - [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md) — file smoke CLI (independent of the app manager)
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)

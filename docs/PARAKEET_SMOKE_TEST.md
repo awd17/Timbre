@@ -112,10 +112,8 @@ That occurs because the package reference is at the project level.
 
 ## Work that is not in this task
 
-- Parakeet microphone capture (see `PARAKEET_MICROPHONE_DICTATION.md`)
+- App-path microphone dictation (see `PARAKEET_MICROPHONE_DICTATION.md`; Parakeet is the production default there)
 - Live or partial Parakeet transcription
-- Replacement of Apple Speech in the default app path
-- Release automatic onboarding (DEBUG-gated; see `SETUP_AND_MODEL_MANAGEMENT.md`)
 - Model selection, settings, hotkeys, text insertion, or LLM features
 
 ## If the test fails
