@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		97516C74300C500100000005 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C75300C500100000006 /* FluidAudio */; };
 		97516C74300C500100000011 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C75300C500100000012 /* FluidAudio */; };
+		97913DDA300D6E9700393CFE /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C8B300C700100000001 /* KeyboardShortcuts */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -103,6 +104,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				97913DDA300D6E9700393CFE /* KeyboardShortcuts in Frameworks */,
 				97516C74300C500100000011 /* FluidAudio in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -224,6 +226,7 @@
 			name = Timbre;
 			packageProductDependencies = (
 				97516C75300C500100000012 /* FluidAudio */,
+				97516C8B300C700100000001 /* KeyboardShortcuts */,
 			);
 			productName = Timbre;
 			productReference = 97EC226D300C275500E4A542 /* Timbre.app */;
@@ -266,6 +269,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				97516C7A300C50010000000B /* XCRemoteSwiftPackageReference "FluidAudio" */,
+				97516C8B300C700100000000 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 97EC226E300C275500E4A542 /* Products */;
@@ -688,6 +692,14 @@
 				version = 0.15.5;
 			};
 		};
+		97516C8B300C700100000000 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
+			requirement = {
+				kind = exactVersion;
+				version = 2.4.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -700,6 +712,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 97516C7A300C50010000000B /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;
+		};
+		97516C8B300C700100000001 /* KeyboardShortcuts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 97516C8B300C700100000000 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
+			productName = KeyboardShortcuts;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

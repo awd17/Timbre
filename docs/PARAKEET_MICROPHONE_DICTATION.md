@@ -76,6 +76,8 @@ The fixture WAV is bundled from `Timbre/Fixtures/parakeet-smoke-test.wav` (copy 
 
 ## Microphone dictation flow
 
+Start and Stop may come from the menu or the global shortcut (`⌃⇧D`; see [`GLOBAL_DICTATION_SHORTCUT.md`](GLOBAL_DICTATION_SHORTCUT.md)). Both paths use `AssistantController`.
+
 1. Start → Preparing (mic permission + `ensureLoaded()`)
 2. Listening (no live transcript text)
 3. Stop → Processing (convert snapshot → Parakeet inference)
