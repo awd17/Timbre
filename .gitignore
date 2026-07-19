@@ -19,8 +19,11 @@ coverage/
 # macOS
 .DS_Store
 
-# SwiftPM
+# SwiftPM / local build caches
 .build/
 .swiftpm/
 Packages/
-Package.resolved
+.derivedData/
+
+# Keep Timbre.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved tracked
+# so FluidAudio stays pinned for the Parakeet smoke-test target.

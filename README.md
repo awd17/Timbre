@@ -58,3 +58,14 @@ Use Start, Stop, Copy Again, or Quit.
 # Path depends on your DerivedData location
 Timbre.app/Contents/MacOS/Timbre --debug-window --mock-transcription
 ```
+
+## Parakeet / FluidAudio smoke test (developer only)
+
+The normal app still uses Apple Speech.  
+A separate CLI target proves Parakeet model download, cache reuse, and file transcription:
+
+```bash
+./scripts/run-parakeet-smoke.sh
+```
+
+Details: [`docs/PARAKEET_SMOKE_TEST.md`](docs/PARAKEET_SMOKE_TEST.md).
