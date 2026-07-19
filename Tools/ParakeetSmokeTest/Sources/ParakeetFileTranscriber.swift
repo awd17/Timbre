@@ -70,6 +70,9 @@ enum ParakeetFileTranscriber {
     }
 
     static func transcribe(audioURL: URL) async throws -> ParakeetTranscriptionDiagnostics {
+#if !arch(arm64)
+        throw ParakeetFileTranscriberError.appleSiliconRequired
+#endif
         let cacheDirectory = cacheDirectory()
         let cacheDirectoryExistedBefore = FileManager.default.fileExists(atPath: cacheDirectory.path)
         let modelsAvailableBefore = modelsAvailable(at: cacheDirectory)
