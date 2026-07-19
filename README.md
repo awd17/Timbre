@@ -15,7 +15,7 @@ For feature status, architecture, and contributor rules, see [`docs/PROJECT_STAT
 - macOS 14.6 or later
 - Xcode 16 or later
 - An Apple Development signing team for local runs
-- Microphone and Speech Recognition permission for real transcription
+- Microphone permission (and Speech Recognition permission for the default Apple Speech path)
 
 ## Setup
 
@@ -50,19 +50,32 @@ Use Start, Stop, Copy Again, or Quit.
 
 | Launch argument | Effect |
 |-----------------|--------|
-| *(none)* | Real Apple Speech and microphone |
+| *(none)* | Real Apple Speech and microphone (default in Debug and Release) |
 | `--mock-transcription` | Debug only. Fake transcript. No microphone. |
+| `--parakeet-transcription` | Debug only. Local Parakeet v2 batch transcription after Stop. |
+| `--parakeet-fixture` | Debug only. With `--parakeet-transcription`, run the committed WAV through the app path (no mic). |
 | `--debug-window` | Debug only. Opens the Timbre Debug window. |
 
 ```bash
 # Path depends on your DerivedData location
 Timbre.app/Contents/MacOS/Timbre --debug-window --mock-transcription
+Timbre.app/Contents/MacOS/Timbre --debug-window --parakeet-transcription
 ```
 
-## Parakeet / FluidAudio smoke test (for developers only)
+Release builds always use Apple Speech and ignore the debug transcription flags.
 
-The default app path uses Apple Speech.  
-A separate command-line target shows Parakeet model download, cache reuse, and file transcription.
+## Parakeet / FluidAudio (for developers only)
+
+The default app path uses Apple Speech.
+
+### Menu-bar opt-in (DEBUG)
+
+Batch microphone dictation through Parakeet is available with `--parakeet-transcription`.  
+Full runbook: [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md).
+
+### Smoke CLI
+
+A separate command-line target still verifies model download, cache reuse, and file transcription:
 
 ```bash
 ./scripts/run-parakeet-smoke.sh

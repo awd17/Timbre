@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		97516C74300C500100000005 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C75300C500100000006 /* FluidAudio */; };
+		97516C74300C500100000011 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C75300C500100000012 /* FluidAudio */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		97516C57300C400100000008 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -51,17 +56,22 @@
 			path = TimbreUITests;
 			sourceTree = "<group>";
 		};
+		97516C72300C500100000003 /* Tools/ParakeetSmokeTest/Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tools/ParakeetSmokeTest/Sources;
+			sourceTree = "<group>";
+		};
+		97516C8A300C600100000001 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
 		97EC226F300C275500E4A542 /* Timbre */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				97516C48300C28E9002836FD /* Exceptions for "Timbre" folder in "Timbre" target */,
 			);
 			path = Timbre;
-			sourceTree = "<group>";
-		};
-		97516C72300C500100000003 /* ParakeetSmokeTestSources */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Tools/ParakeetSmokeTest/Sources;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -81,13 +91,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		97EC226A300C275500E4A542 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		97516C73300C500100000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -96,20 +99,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		97EC226A300C275500E4A542 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				97516C74300C500100000011 /* FluidAudio in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
-
-/* Begin PBXBuildFile section */
-		97516C74300C500100000005 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = 97516C75300C500100000006 /* FluidAudio */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXGroup section */
 		97EC2264300C275500E4A542 = {
 			isa = PBXGroup;
 			children = (
 				97EC226F300C275500E4A542 /* Timbre */,
+				97516C8A300C600100000001 /* Shared */,
 				97516C52300C400100000003 /* TimbreTests */,
 				97516C62300C400100000013 /* TimbreUITests */,
-				97516C72300C500100000003 /* ParakeetSmokeTestSources */,
+				97516C72300C500100000003 /* Tools/ParakeetSmokeTest/Sources */,
 				97EC226E300C275500E4A542 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -174,6 +182,29 @@
 			productReference = 97516C60300C400100000011 /* TimbreUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		97516C70300C500100000001 /* ParakeetSmokeTest */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 97516C79300C50010000000A /* Build configuration list for PBXNativeTarget "ParakeetSmokeTest" */;
+			buildPhases = (
+				97516C76300C500100000007 /* Sources */,
+				97516C73300C500100000004 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				97516C72300C500100000003 /* Tools/ParakeetSmokeTest/Sources */,
+				97516C8A300C600100000001 /* Shared */,
+			);
+			name = ParakeetSmokeTest;
+			packageProductDependencies = (
+				97516C75300C500100000006 /* FluidAudio */,
+			);
+			productName = ParakeetSmokeTest;
+			productReference = 97516C71300C500100000002 /* ParakeetSmokeTest */;
+			productType = "com.apple.product-type.tool";
+		};
 		97EC226C300C275500E4A542 /* Timbre */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 97EC2279300C275800E4A542 /* Build configuration list for PBXNativeTarget "Timbre" */;
@@ -188,35 +219,15 @@
 			);
 			fileSystemSynchronizedGroups = (
 				97EC226F300C275500E4A542 /* Timbre */,
+				97516C8A300C600100000001 /* Shared */,
 			);
 			name = Timbre;
 			packageProductDependencies = (
+				97516C75300C500100000012 /* FluidAudio */,
 			);
 			productName = Timbre;
 			productReference = 97EC226D300C275500E4A542 /* Timbre.app */;
 			productType = "com.apple.product-type.application";
-		};
-		97516C70300C500100000001 /* ParakeetSmokeTest */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 97516C79300C50010000000A /* Build configuration list for PBXNativeTarget "ParakeetSmokeTest" */;
-			buildPhases = (
-				97516C76300C500100000007 /* Sources */,
-				97516C73300C500100000004 /* Frameworks */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				97516C72300C500100000003 /* ParakeetSmokeTestSources */,
-			);
-			name = ParakeetSmokeTest;
-			packageProductDependencies = (
-				97516C75300C500100000006 /* FluidAudio */,
-			);
-			productName = ParakeetSmokeTest;
-			productReference = 97516C71300C500100000002 /* ParakeetSmokeTest */;
-			productType = "com.apple.product-type.tool";
 		};
 /* End PBXNativeTarget section */
 
@@ -308,14 +319,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		97EC2269300C275500E4A542 /* Sources */ = {
+		97516C76300C500100000007 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		97516C76300C500100000007 /* Sources */ = {
+		97EC2269300C275500E4A542 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -405,6 +416,36 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = Timbre;
+			};
+			name = Release;
+		};
+		97516C77300C500100000008 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 264VP7B2Z9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.ParakeetSmokeTest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		97516C78300C500100000009 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 264VP7B2Z9;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.6;
+				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.ParakeetSmokeTest;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -588,36 +629,6 @@
 			};
 			name = Release;
 		};
-		97516C77300C500100000008 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 264VP7B2Z9;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.ParakeetSmokeTest;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		97516C78300C500100000009 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = 264VP7B2Z9;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.ParakeetSmokeTest;
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				SKIP_INSTALL = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -635,6 +646,15 @@
 			buildConfigurations = (
 				97516C68300C400100000019 /* Debug */,
 				97516C69300C40010000001A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		97516C79300C50010000000A /* Build configuration list for PBXNativeTarget "ParakeetSmokeTest" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				97516C77300C500100000008 /* Debug */,
+				97516C78300C500100000009 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -657,15 +677,6 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		97516C79300C50010000000A /* Build configuration list for PBXNativeTarget "ParakeetSmokeTest" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				97516C77300C500100000008 /* Debug */,
-				97516C78300C500100000009 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
@@ -681,6 +692,11 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		97516C75300C500100000006 /* FluidAudio */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 97516C7A300C50010000000B /* XCRemoteSwiftPackageReference "FluidAudio" */;
+			productName = FluidAudio;
+		};
+		97516C75300C500100000012 /* FluidAudio */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 97516C7A300C50010000000B /* XCRemoteSwiftPackageReference "FluidAudio" */;
 			productName = FluidAudio;

@@ -37,16 +37,51 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
         presentDebugWindowIfNeeded()
+        ParakeetFixtureGate.runIfRequested(
+            arguments: ProcessInfo.processInfo.arguments,
+            controller: controller
+        )
         #endif
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        controller.prepareForTermination()
+        return .terminateNow
     }
 
     private static func makeTranscriptionService() -> any TranscriptionServicing {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--mock-transcription") {
-            return MockTranscriptionService()
+        let arguments = ProcessInfo.processInfo.arguments
+        let resolution = TranscriptionBackendSelection.resolve(arguments: arguments, isDebug: true)
+        if resolution.conflictingFlagsIgnoredParakeet {
+            TimbreLog.line(
+                "Timbre: both \(TranscriptionBackendSelection.mockArgument) and \(TranscriptionBackendSelection.parakeetArgument) set; using mock transcription."
+            )
         }
-        #endif
+        TimbreLog.line("Timbre transcription backend: \(resolution.backend.logName)")
+
+        switch resolution.backend {
+        case .mock:
+            return MockTranscriptionService()
+        case .parakeet:
+            if TranscriptionBackendSelection.wantsParakeetFixture(arguments: arguments, isDebug: true) {
+                if let fixtureURL = ParakeetTranscriptionService.defaultFixtureURL() {
+                    TimbreLog.line("Timbre Parakeet: using fixture \(fixtureURL.path)")
+                    return ParakeetTranscriptionService(fixtureURL: fixtureURL)
+                }
+                TimbreLog.line(
+                    "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; falling back to Apple Speech."
+                )
+                return SpeechRecognitionService()
+            }
+            return ParakeetTranscriptionService(audioSource: ParakeetMicrophoneAudioSource())
+        case .appleSpeech:
+            return SpeechRecognitionService()
+        }
+        #else
+        TimbreLog.line("Timbre transcription backend: appleSpeech")
         return SpeechRecognitionService()
+        #endif
     }
 
     #if DEBUG

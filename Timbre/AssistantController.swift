@@ -27,7 +27,7 @@ final class AssistantController {
     func startDictation() async {
         guard canStart else { return }
 
-        sessionState = .requestingPermission
+        sessionState = .preparing
 
         do {
             try await transcription.prepare()
@@ -41,6 +41,11 @@ final class AssistantController {
             await transcription.cancel()
             sessionState = .failed(message: error.localizedDescription, transcript: "")
         }
+    }
+
+    /// Releases microphone resources synchronously before the process exits.
+    func prepareForTermination() {
+        (transcription as? TerminationHandling)?.shutdownForTermination()
     }
 
     func stopDictation() async {

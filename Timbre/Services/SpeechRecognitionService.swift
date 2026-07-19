@@ -4,7 +4,7 @@ import Speech
 
 /// Apple Speech + AVAudioEngine transcription. Replaceable via `TranscriptionServicing`.
 @MainActor
-final class SpeechRecognitionService: TranscriptionServicing {
+final class SpeechRecognitionService: TranscriptionServicing, TerminationHandling {
     private let locale: Locale
     private let speechRecognizer: SFSpeechRecognizer?
 
@@ -163,7 +163,11 @@ final class SpeechRecognitionService: TranscriptionServicing {
     }
 
     func cancel() async {
-        await tearDown(invalidateSession: true)
+        tearDownSync(invalidateSession: true)
+    }
+
+    func shutdownForTermination() {
+        tearDownSync(invalidateSession: true)
     }
 
     deinit {
@@ -178,6 +182,10 @@ final class SpeechRecognitionService: TranscriptionServicing {
     // MARK: - Private
 
     private func tearDown(invalidateSession: Bool) async {
+        tearDownSync(invalidateSession: invalidateSession)
+    }
+
+    private func tearDownSync(invalidateSession: Bool) {
         stopTimeoutTask?.cancel()
         stopTimeoutTask = nil
 
