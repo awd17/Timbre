@@ -33,13 +33,13 @@ The UI and the controller do not depend on a specific speech engine.
 - Mock transcription in DEBUG builds
 - Debug window for UI tests in DEBUG builds
 - Unit tests and UI tests
-- Parakeet / FluidAudio **model download, load, and file-transcription proof** (developer CLI only; see [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md))
+- Parakeet / FluidAudio model download, load, and file-transcription test (developer CLI only; see [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md))
 
 ### Not started
 
-- Parakeet live dictation / microphone capture via FluidAudio
-- Parakeet implementation of `TranscriptionServicing`
-- Replacing Apple Speech as the default engine
+- Parakeet live dictation and microphone capture through FluidAudio
+- Parakeet code for `TranscriptionServicing`
+- Apple Speech replacement as the default engine
 - Global keyboard shortcuts
 - Floating panel
 - Paste into the focused app
@@ -62,11 +62,12 @@ Approximate size: 950 lines of Swift (app target).
 4. Clipboard uses `ClipboardServicing`.
 
 Apple Speech lives in `SpeechRecognitionService`.  
-A future Parakeet or FluidAudio service can implement the same protocol.  
+A future Parakeet or FluidAudio service can use the same protocol.  
 You do not need to rewrite the menu UI for that change.
 
-The Parakeet smoke harness is intentionally **outside** that protocol for now.  
-It is a separate developer CLI that proves offline file transcription only.
+The Parakeet smoke test is outside that protocol for now.  
+It is a separate developer CLI.  
+It only shows offline file transcription.
 
 ### Session model
 
@@ -97,9 +98,9 @@ Timbre/
   Views/MenuBarDictationView.swift
 Tools/ParakeetSmokeTest/
   Sources/                        Developer CLI (FluidAudio only here)
-  Fixtures/                       WAV + expected script notes
-scripts/run-parakeet-smoke.sh     Builds and runs the smoke CLI
-docs/PARAKEET_SMOKE_TEST.md       Smoke-test runbook
+  Fixtures/                       WAV file and script notes
+scripts/run-parakeet-smoke.sh     Builds and starts the smoke CLI
+docs/PARAKEET_SMOKE_TEST.md       Smoke-test steps
 TimbreTests/                      Controller and session lifecycle tests
 TimbreUITests/                    Debug-window mock test and screenshot attachment
 ```
@@ -110,7 +111,7 @@ TimbreUITests/                    Debug-window mock test and screenshot attachme
 - New speech backends must implement `TranscriptionServicing` when they join the interactive app path.
 - Prefer changes to `SessionState` over new controller flags.
 - Keep mock transcription and the debug window inside `#if DEBUG`.
-- Release builds must use `SpeechRecognitionService` until a later task switches engines.
+- Release builds must use `SpeechRecognitionService` until a later task changes the engine.
 - Keep FluidAudio linked only to `ParakeetSmokeTest` until a later task adds app integration.
 - Keep permission strings in the Xcode target Info settings.
 - Keep App Sandbox off unless a later task requires it.
@@ -135,7 +136,7 @@ Do not start these items unless a task asks for them:
 4. The project added the transcription protocol and a mock service.
 5. The project added unit tests and one UI test.
 6. The project hardened concurrency with `@MainActor` and session tokens.
-7. The project added a developer-only Parakeet / FluidAudio file-transcription smoke test.
+7. The project added a developer CLI for Parakeet / FluidAudio file transcription.
 
 ## Related docs
 

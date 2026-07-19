@@ -25,5 +25,9 @@ coverage/
 Packages/
 .derivedData/
 
+# Temporary speech synthesis intermediates (fixture source only; do not commit)
+*.aiff
+*.AIFF
+
 # Keep Timbre.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved tracked
 # so FluidAudio stays pinned for the Parakeet smoke-test target.

@@ -8,17 +8,23 @@ Timbre smoke test. The quick brown fox jumps over the lazy dog. Please recognize
 
 ## Source
 
-Synthetic macOS `say` speech (Samantha, rate 160), converted to 16 kHz mono 16-bit PCM WAV via `afconvert`.
+This file is synthetic speech from macOS `say` (Samantha, rate 160).  
+`afconvert` made a 16 kHz mono 16-bit PCM WAV file.
 
 ## Soft validation
 
-Normalization: lowercase, strip punctuation, collapse whitespace.
+Make the text simple before you compare:
 
-Required:
+1. Change all letters to lowercase.
+2. Remove punctuation.
+3. Make multiple spaces into one space.
 
-- Non-empty transcript
-- Substring `quick brown fox`
-- Substring `lazy dog`
-- At least one of: `timbre`, `smoke test`, `parakeet`
+Required checks:
 
-Exact punctuation and capitalization are not required.
+- The transcript is not empty.
+- The transcript contains `quick brown fox`.
+- The transcript contains `lazy dog`.
+- The transcript contains one or more of these phrases: `timbre`, `smoke test`, `parakeet`.
+
+Do not require exact punctuation.  
+Do not require exact capitalization.

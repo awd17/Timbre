@@ -59,13 +59,13 @@ Use Start, Stop, Copy Again, or Quit.
 Timbre.app/Contents/MacOS/Timbre --debug-window --mock-transcription
 ```
 
-## Parakeet / FluidAudio smoke test (developer only)
+## Parakeet / FluidAudio smoke test (for developers only)
 
-The normal app still uses Apple Speech.  
-A separate CLI target proves Parakeet model download, cache reuse, and file transcription:
+The default app path uses Apple Speech.  
+A separate command-line target shows Parakeet model download, cache reuse, and file transcription.
 
 ```bash
 ./scripts/run-parakeet-smoke.sh
 ```
 
-Details: [`docs/PARAKEET_SMOKE_TEST.md`](docs/PARAKEET_SMOKE_TEST.md).
+Full steps: [`docs/PARAKEET_SMOKE_TEST.md`](docs/PARAKEET_SMOKE_TEST.md).

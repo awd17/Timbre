@@ -1,39 +1,44 @@
-# Parakeet smoke test (developer only)
+# Parakeet smoke test (for developers only)
 
-This proves FluidAudio can download, cache, load, and file-transcribe the English Parakeet TDT 0.6B v2 Core ML model inside the Timbre repository. It does **not** wire Parakeet into the menu-bar dictation app.
+This test shows that FluidAudio can download, store, load, and transcribe with the English Parakeet TDT 0.6B v2 Core ML model in this repository.  
+This test does not connect Parakeet to the menu-bar dictation app.
 
 ## Versions
 
 | Item | Value |
 |------|--------|
-| FluidAudio (SPM) | **0.15.5** (`19600a485baa4998812e4654b70d2bab8f2c9949`) |
-| Model | `FluidInference/parakeet-tdt-0.6b-v2-coreml` via `AsrModelVersion.v2` |
+| FluidAudio (SPM) | 0.15.5 (`19600a485baa4998812e4654b70d2bab8f2c9949`) |
+| Model | `FluidInference/parakeet-tdt-0.6b-v2-coreml` through `AsrModelVersion.v2` |
 | Pin file | [`Timbre.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`](../Timbre.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved) |
 
 ## How to run
 
-From the repository root:
+Start from the root of the repository.
 
 ```bash
 ./scripts/run-parakeet-smoke.sh
 ```
 
-The script:
+The script does this work:
 
-1. Locates the repo root from its own path
-2. Builds the `ParakeetSmokeTest` Xcode scheme into `.derivedData/ParakeetSmokeTest`
-3. Runs the executable with `--audio <absolute-path-to-fixture>`
+1. It finds the repository root from the script path.
+2. It builds the `ParakeetSmokeTest` Xcode scheme into `.derivedData/ParakeetSmokeTest`.
+3. It starts the program with `--audio <absolute-path-to-fixture>`.
 
-Exit `0` only when model preparation, transcription, and soft validation all succeed.
+The program returns exit code `0` only when these steps succeed:
+
+- Model preparation
+- Transcription
+- Soft validation
 
 ## Fixture
 
-| Item | Path / value |
+| Item | Path or value |
 |------|----------------|
 | WAV | [`Tools/ParakeetSmokeTest/Fixtures/parakeet-smoke-test.wav`](../Tools/ParakeetSmokeTest/Fixtures/parakeet-smoke-test.wav) |
 | Script notes | [`Tools/ParakeetSmokeTest/Fixtures/EXPECTED_TRANSCRIPT.md`](../Tools/ParakeetSmokeTest/Fixtures/EXPECTED_TRANSCRIPT.md) |
-| Format | WAVE, 1 ch, 16 kHz, Int16 PCM |
-| Duration | ~12.8 s (validated with `afinfo`) |
+| Format | WAVE, 1 channel, 16 kHz, Int16 PCM |
+| Duration | About 12.8 s (`afinfo` check) |
 
 Spoken script:
 
@@ -41,71 +46,82 @@ Spoken script:
 Timbre smoke test. The quick brown fox jumps over the lazy dog. Please recognize this clear English sentence for Parakeet. This is a local speech recognition proof using Fluid Audio and Core M L.
 ```
 
-Soft validation (after normalizing case/punctuation/whitespace):
+Soft validation rules (after you make case, punctuation, and spaces simple):
 
-- Non-empty transcript
-- Contains `quick brown fox`
-- Contains `lazy dog`
-- Contains at least one of `timbre`, `smoke test`, or `parakeet`
+- The transcript is not empty.
+- The transcript contains `quick brown fox`.
+- The transcript contains `lazy dog`.
+- The transcript contains one or more of these phrases: `timbre`, `smoke test`, `parakeet`.
 
 ## Model cache
 
-Measured on a clean first run (this machine):
+Data from one clean first run on this computer:
 
 | Item | Value |
 |------|--------|
 | Cache directory | `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2` |
-| Measured recursive size | **464,413,250 bytes (~464.4 MB)** |
-| Hugging Face listing size | ~2.5 GB is only an expectation; use the measured local size |
+| Local size (all files) | 464,413,250 bytes (about 464.4 MB) |
+| Hugging Face size note | About 2.5 GB is only an estimate. Use the local size. |
 
-### First run vs cached run (observed)
+### First run and second run
 
 | Metric | First run | Second run |
 |--------|-----------|------------|
 | `cache_directory_existed_before` | false | true |
 | `models_available_before` | false | true |
-| Cache size before → after | 0 → 464.4 MB | 464.4 MB → 464.4 MB |
+| Cache size before and after | 0 to 464.4 MB | 464.4 MB to 464.4 MB |
 | `cache_grew_meaningfully` | true | false |
 | `likely_cache_reuse` | false | true |
-| Download + model preparation | ~269.8 s | ~0.40 s |
-| Transcription wall time | ~0.30 s | ~0.37 s |
+| Download and model preparation | About 269.8 s | About 0.40 s |
+| Transcription time | About 0.30 s | About 0.37 s |
 
-FluidAudio logs on the second run included `ASR models already present` / `Found parakeet-tdt-0.6b-v2 locally, no download needed`.
+On the second run, FluidAudio wrote these messages:
 
-### Clear the cache (tested)
+- `ASR models already present`
+- `Found parakeet-tdt-0.6b-v2 locally, no download needed`
 
-To force a clean re-download:
+### Remove the cache
+
+Use this command to remove the cache and force a new download:
 
 ```bash
 rm -rf "$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
 ```
 
-This exact command was tested after the smoke runs: the directory was removed successfully. No FluidAudio cache-clearing API was used or documented here.
+This command was tested after the smoke runs.  
+The directory was removed.  
+Do not use a FluidAudio cache API for this step. This document does not describe one.
 
 ## Isolation from Timbre.app
 
-- `ParakeetSmokeTest` is a separate macOS command-line target
-- FluidAudio links **only** to that target
-- The Timbre scheme does not build or archive `ParakeetSmokeTest`
-- `otool -L` on `Timbre.app` shows no FluidAudio dylib; `nm` shows no FluidAudio/Parakeet symbols
-- Ordinary Timbre unit tests do not download models
+- `ParakeetSmokeTest` is a separate macOS command-line target.
+- Only that target links FluidAudio.
+- The Timbre scheme does not build or archive `ParakeetSmokeTest`.
+- `otool -L` on `Timbre.app` does not show a FluidAudio library.
+- `nm` on `Timbre.app` does not show FluidAudio or Parakeet symbols.
+- Timbre unit tests do not download models.
 
-Xcode may still *resolve* the FluidAudio package when opening/building the project (project-level SPM reference), but Timbre does not link or execute it.
+Xcode can still resolve the FluidAudio package when you open or build the project.  
+That occurs because the package reference is at the project level.  
+The Timbre app does not link FluidAudio.  
+The Timbre app does not run FluidAudio.
 
-## Licensing / attribution
+## License and credit
 
-- FluidAudio: see the upstream repository license
-- Parakeet TDT 0.6B v2 Core ML (`FluidInference/parakeet-tdt-0.6b-v2-coreml`): **CC-BY-4.0** on Hugging Face; based on NVIDIA Parakeet; Core ML conversion by FluidInference
+- FluidAudio: read the license in the FluidAudio repository.
+- Parakeet TDT 0.6B v2 Core ML (`FluidInference/parakeet-tdt-0.6b-v2-coreml`): CC-BY-4.0 on Hugging Face. The model is based on NVIDIA Parakeet. FluidInference made the Core ML conversion.
 
-## Intentionally unimplemented
+## Work that is not in this task
 
 - Parakeet microphone capture
-- Live / partial Parakeet transcription
-- `TranscriptionServicing` conformance for Parakeet
-- Replacing Apple Speech in the normal app
-- Onboarding / download progress UI
-- Model selection, settings, hotkeys, insertion, LLM features
+- Live or partial Parakeet transcription
+- Parakeet support for `TranscriptionServicing`
+- Replacement of Apple Speech in the default app path
+- Onboarding or download progress UI
+- Model selection, settings, hotkeys, text insertion, or LLM features
 
-## Troubleshooting
+## If the test fails
 
-If `./scripts/run-parakeet-smoke.sh` fails after a clean clone, inspect FluidAudio’s own CLI against the same fixture to separate package/model issues from Timbre Xcode wiring. The Timbre smoke target remains the supported repeatable proof.
+If `./scripts/run-parakeet-smoke.sh` fails after a clean clone, run FluidAudio CLI on the same fixture.  
+Use that result to find if the fault is in FluidAudio or in the Timbre Xcode setup.  
+Keep the Timbre smoke target as the standard repeatable test.
