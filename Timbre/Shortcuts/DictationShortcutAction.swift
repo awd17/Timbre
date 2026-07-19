@@ -52,9 +52,8 @@ enum DictationShortcutPolicy {
             if setup.isInstalling {
                 return .none
             }
-            if setup.isSetupFailed {
-                return .presentSetup
-            }
+            // Both setup-required and setup-failed present the setup window.
+            // If these cases need to diverge in future, split them here.
             return .presentSetup
         }
 
