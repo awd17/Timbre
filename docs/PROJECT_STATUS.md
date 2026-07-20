@@ -43,6 +43,7 @@ The UI and the controller do not depend on a specific speech engine.
 - **First-run setup in Debug and Release** (welcome → mic → text insertion → download/verify → ready)
 - Dictation readiness requires installed model, granted microphone, **and** Accessibility trust
 - **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; toggle Start/Stop)
+- **Model prewarming** after setup readiness (`loadInstalledAndRetain`; never downloads; Start joins single-flight load)
 
 ### Not started / out of this milestone
 
@@ -50,13 +51,13 @@ The UI and the controller do not depend on a specific speech engine.
 - Full Settings screen / user model controls
 - Shortcut customization UI (`KeyboardShortcuts.Recorder` — required before public release)
 - Floating panel
-- Model prewarming / first-Start latency reduction (next PR)
 - Read or replace selected text
 - Text rewrite and LLM features
 - Assistant mode and CUA
 - Accounts and billing
 - DMG packaging, Developer ID signing, and notarization
 - macOS “Timbre is ready” notifications
+- Onboarding / menu-bar visual polish
 
 ## Architecture
 
@@ -70,7 +71,8 @@ The app is small and layered.
 4. Clipboard uses `ClipboardServicing`.
 5. Transcript delivery uses `TranscriptDeliveryServicing` (clipboard + Accessibility + Command-V).
 6. `ParakeetModelManager` owns model install/load; setup and Parakeet dictation share it.
-7. `DictationShortcutCoordinator` maps hotkey presses to Start/Stop/setup (no FluidAudio coupling).
+7. `ParakeetPrewarmCoordinator` loads the installed model after setup readiness (no download).
+8. `DictationShortcutCoordinator` maps hotkey presses to Start/Stop/setup (no FluidAudio coupling).
 
 Backends:
 
@@ -82,7 +84,7 @@ Views must not import FluidAudio, AVFoundation, Core ML, or `AsrManager`.
 
 FluidAudio 0.15.5 is linked to both the **Timbre** app target and **ParakeetSmokeTest**.  
 KeyboardShortcuts 2.4.0 is linked to the **Timbre** app target only.  
-Launch construction is side-effect-free: no mic prompt, download, or model load until setup / Start.
+Launch construction is side-effect-free: no mic prompt, download, or model load until setup / prewarm / Start.
 
 ### Session model
 
@@ -110,6 +112,7 @@ Timbre/
     ParakeetTranscriptionService.swift  production default
     ParakeetModelManaging.swift
     ParakeetModelManager.swift
+    ParakeetPrewarmCoordinator.swift
     ModelPreparationState.swift
     MicrophonePermissionProviding.swift
     AccessibilityPermissionProviding.swift
@@ -165,12 +168,12 @@ Do not start these items unless a task asks for them:
 
 - Live Parakeet partials / streaming ASR
 - Shortcut Recorder / onboarding shortcut picker
-- Model prewarming / first-Start latency reduction (next focused PR)
 - Direct AX text replacement / selection rewrite
 - Full Settings screens
 - Authentication
 - Billing
 - Packaging and notarization
+- Onboarding / menu visual polish
 
 ## History from the blank template
 
@@ -186,6 +189,7 @@ Do not start these items unless a task asks for them:
 10. The project made Parakeet the production default and enabled setup in Release.
 11. The project added a global dictation toggle shortcut (temporary ⌃⇧D).
 12. The project added focused-app text insertion (Accessibility + clipboard Command-V).
+13. The project added model prewarming after setup readiness to reduce first-Start latency.
 
 ## Related docs
 
@@ -193,6 +197,7 @@ Do not start these items unless a task asks for them:
 - Parakeet smoke test: `docs/PARAKEET_SMOKE_TEST.md`
 - Parakeet app mic path: `docs/PARAKEET_MICROPHONE_DICTATION.md`
 - Setup / model management: `docs/SETUP_AND_MODEL_MANAGEMENT.md`
+- Model prewarming: `docs/MODEL_PREWARMING.md`
 - Global shortcut: `docs/GLOBAL_DICTATION_SHORTCUT.md`
 - Focused-app insertion: `docs/FOCUSED_APP_TEXT_INSERTION.md`
 - Repository: https://github.com/awd17/Timbre

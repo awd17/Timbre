@@ -25,8 +25,10 @@ SetupFlowView / MenuBarDictationView
               → MicrophonePermissionProviding
               → AccessibilityPermissionProviding
               → ParakeetModelManaging (ensureInstalled)
+ParakeetPrewarmCoordinator (after readiness)
+        → ParakeetModelManaging.loadInstalledAndRetain()  # no download
 ParakeetTranscriptionService (production default)
-        → ParakeetModelManager.ensureLoaded()   # first Start only loads into memory
+        → ParakeetModelManager.ensureLoaded()   # joins prewarm or loads; retains
 ParakeetModelManager
         → FluidAudio AsrModels / AsrManager
         → on-disk cache (source of truth for “installed”)
@@ -34,7 +36,7 @@ ParakeetModelManager
 
 Views must not import FluidAudio.
 
-Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` must not request the microphone, download files, or load the model. Setup owns `ensureInstalled()`; the first Start owns `ensureLoaded()`.
+Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` must not request the microphone, download files, or load the model. Setup owns `ensureInstalled()`. After readiness, `ParakeetPrewarmCoordinator` owns proactive `loadInstalledAndRetain()`. Dictation Start owns `ensureLoaded()` (may join prewarm).
 
 ### Installed vs loaded
 
@@ -43,16 +45,23 @@ Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` m
 | `notInstalled` | Required files are not present |
 | `downloading` | Download in progress |
 | `installed` | On disk and verified; **no** retained `AsrManager` |
-| `loading` | Compiling/loading into memory |
+| `loading` | Install/verify compile into memory (setup Preparing) |
 | `loaded` | `AsrManager` retained for dictation |
-| `failed` | Recoverable failure |
+| `failed` | Recoverable install failure |
 
 - **Onboarding** calls `ensureInstalled()`: download → verify load → **release** manager → `installed`.
+- **Prewarming** calls `loadInstalledAndRetain()`: load from disk only, **retain**, never download.
 - **Production Parakeet dictation** calls `ensureLoaded()`: load (download if needed) and **retain** while useful.
+
+Loading an existing cache into memory leaves the public lifecycle at `installed` until the retained
+manager is ready. A private owned flight tracks the in-progress operation, keeping disk readiness and
+memory activity from becoming competing enum states.
+
+See [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md).
 
 ### Single-flight
 
-`ParakeetModelManager` shares one install task and one load task. Opening setup twice, or overlapping install with dictation prepare, must not start competing downloads.
+`ParakeetModelManager` shares one install task and one owned load flight. Opening setup twice, or overlapping install with dictation prepare, must not start competing downloads.
 
 Session cancel and closing the setup window do **not** cancel preparation.
 

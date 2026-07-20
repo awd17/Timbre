@@ -27,6 +27,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let controller: AssistantController
     let modelManager: ParakeetModelManager
     let setupCoordinator: SetupCoordinator?
+    let prewarmCoordinator: ParakeetPrewarmCoordinator?
     let shortcutCoordinator: DictationShortcutCoordinator
 
     private var debugWindow: NSWindow?
@@ -42,15 +43,39 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         let targetProvider = FrontmostApplicationTracker()
         let accessibility = AccessibilityPermissionService()
 
+        let createdSetupCoordinator: SetupCoordinator?
         if setupEnabled {
-            setupCoordinator = SetupCoordinator(
+            createdSetupCoordinator = SetupCoordinator(
                 modelManager: modelManager,
                 microphone: MicrophonePermissionService(),
                 accessibility: accessibility,
                 featureEnabled: true
             )
         } else {
-            setupCoordinator = nil
+            createdSetupCoordinator = nil
+        }
+        setupCoordinator = createdSetupCoordinator
+
+        if let createdSetupCoordinator {
+            let prewarmCoordinator = ParakeetPrewarmCoordinator(
+                modelManager: modelManager,
+                isEligible: { [weak createdSetupCoordinator] in
+                    createdSetupCoordinator?.allowsDictation == true
+                },
+                isParakeetProductionBackend: Self.isProductionParakeetBackend(
+                    arguments: arguments
+                ),
+                disablePrewarm: Self.shouldDisableModelPrewarm(arguments: arguments),
+                onModelStateChanged: { [weak createdSetupCoordinator] in
+                    createdSetupCoordinator?.modelPreparationDidChange()
+                }
+            )
+            self.prewarmCoordinator = prewarmCoordinator
+            createdSetupCoordinator.onReadinessChanged = { [weak prewarmCoordinator] _ in
+                prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
+            }
+        } else {
+            prewarmCoordinator = nil
         }
 
         controller = AssistantController(
@@ -104,6 +129,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
             presentSetupWindow()
         }
+
+        prewarmCoordinator?.evaluate(source: .launchReadiness)
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -125,6 +152,35 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         #else
         return false
         #endif
+    }
+
+    private static func isProductionParakeetBackend(arguments: [String]) -> Bool {
+#if DEBUG
+        let isDebug = true
+#else
+        let isDebug = false
+#endif
+        let resolution = TranscriptionBackendSelection.resolve(
+            arguments: arguments,
+            isDebug: isDebug
+        )
+        guard resolution.backend == .parakeet else { return false }
+        return !TranscriptionBackendSelection.wantsParakeetFixture(
+            arguments: arguments,
+            isDebug: isDebug
+        )
+    }
+
+    private static func shouldDisableModelPrewarm(arguments: [String]) -> Bool {
+#if DEBUG
+        let isDebug = true
+#else
+        let isDebug = false
+#endif
+        return ParakeetPrewarmCoordinator.shouldDisablePrewarm(
+            arguments: arguments,
+            isDebug: isDebug
+        )
     }
 
     func presentSetupWindow() {

@@ -67,7 +67,7 @@ enum ModelPreparationState: Equatable {
         }
     }
 
-    /// On-disk and verified (or already loaded). Does not include in-flight download/load.
+    /// On-disk and verified (or already loaded). Cached memory loads remain `installed`.
     var isInstalled: Bool {
         switch self {
         case .installed, .loaded:

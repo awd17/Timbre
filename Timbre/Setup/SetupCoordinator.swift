@@ -162,6 +162,9 @@ final class SetupCoordinator {
     private let featureEnabled: Bool
     private var inFlightEffect: SetupEffect?
     private var effectTask: Task<Void, Never>?
+    private var previousAllowsDictation: Bool?
+
+    var onReadinessChanged: ((Bool) -> Void)?
 
     init(
         modelManager: any ParakeetModelManaging,
@@ -234,6 +237,13 @@ final class SetupCoordinator {
     /// Refresh model + permission facts when the app (or setup window) becomes active.
     func applicationDidBecomeActive() {
         windowDidBecomeActive()
+    }
+
+    /// Reconciles a lifecycle change that the setup effect did not initiate, such
+    /// as prewarm discovering and invalidating an unusable on-disk model cache.
+    func modelPreparationDidChange() {
+        guard featureEnabled else { return }
+        reconcile(intent: .refresh)
     }
 
     func windowDidBecomeActive() {
@@ -318,6 +328,7 @@ final class SetupCoordinator {
         if effect != .none {
             start(effect)
         }
+        notifyReadinessIfNeeded()
     }
 
     private func clearStaleReadyPreferenceIfNeeded() {
@@ -364,6 +375,14 @@ final class SetupCoordinator {
         guard inFlightEffect == effect else { return }
         inFlightEffect = nil
         effectTask = nil
+        // reconcile notifies readiness after facts settle.
         reconcile(intent: .refresh)
+    }
+
+    private func notifyReadinessIfNeeded() {
+        let current = allowsDictation
+        guard previousAllowsDictation != current else { return }
+        previousAllowsDictation = current
+        onReadinessChanged?(current)
     }
 }

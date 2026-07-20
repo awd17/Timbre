@@ -101,5 +101,5 @@ Uses `FakeGlobalShortcutService` — no real system hotkeys.
 ## Related
 
 - Focused-app insertion: [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md).
-- Next PR: reduce slow first-Start latency (model prewarming).
+- Model prewarming: [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md).
 - Later: onboarding polish with `KeyboardShortcuts.Recorder`.
