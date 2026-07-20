@@ -45,6 +45,7 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
     var downloadError: Error?
     var invalidateError: Error?
     var suspendsLoad = false
+    var suspendOnLoadCall: Int?
     var suspendsDownload = false
 
     private(set) var validationCallCount = 0
@@ -105,7 +106,7 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
         loadStartWaiters.removeAll()
         waiters.forEach { $0.resume() }
 
-        if suspendsLoad {
+        if suspendsLoad || suspendOnLoadCall == loadCallCount {
             await withCheckedContinuation { continuation in
                 loadGate = continuation
             }
@@ -120,8 +121,8 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
         }
     }
 
-    func waitForLoadStart() async {
-        if loadCallCount > 0 { return }
+    func waitForLoadStart(callNumber: Int = 1) async {
+        if loadCallCount >= callNumber { return }
         await withCheckedContinuation { continuation in
             loadStartWaiters.append(continuation)
         }
@@ -136,6 +137,7 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
 
     func resumeLoad() {
         suspendsLoad = false
+        suspendOnLoadCall = nil
         loadGate?.resume()
         loadGate = nil
     }
@@ -149,6 +151,42 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
 
 @MainActor
 final class ParakeetModelManagerTests: XCTestCase {
+    func testPrewarmRechecksLoadFlightAfterInstallWait() async throws {
+        let loader = FakeParakeetModelLoader(cacheExists: false)
+        loader.suspendsDownload = true
+        loader.suspendOnLoadCall = 2
+        let manager = ParakeetModelManager(loader: loader)
+
+        let install = Task { @MainActor in
+            try await manager.ensureInstalled()
+        }
+        await loader.waitForDownloadStart()
+
+        let prewarm = Task { @MainActor in
+            try await manager.loadInstalledAndRetain()
+        }
+        await Task.yield()
+        let start = Task { @MainActor in
+            try await manager.ensureLoaded()
+        }
+        await Task.yield()
+
+        loader.resumeDownload()
+        try await install.value
+        await loader.waitForLoadStart(callNumber: 2)
+        await Task.yield()
+
+        XCTAssertEqual(loader.downloadCallCount, 1)
+        XCTAssertEqual(loader.loadCallCount, 2)
+
+        loader.resumeLoad()
+        _ = try await start.value
+        try await prewarm.value
+
+        XCTAssertEqual(loader.loadCallCount, 2)
+        XCTAssertEqual(manager.state, .loaded)
+    }
+
     func testConcurrentPrewarmAndStartShareProductionLoadFlight() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: true)
         loader.suspendsLoad = true

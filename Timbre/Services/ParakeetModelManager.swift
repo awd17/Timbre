@@ -190,6 +190,20 @@ final class ParakeetModelManager: ParakeetModelManaging {
             try? await installTask.value
         }
 
+        // The install wait is an actor suspension; Start may have loaded the manager
+        // or created a flight while prewarm was waiting.
+        if asrManager != nil {
+            state = .loaded
+            TimbreLog.line("Timbre model: prewarm found manager loaded during install wait.")
+            return
+        }
+
+        if let loadFlight {
+            TimbreLog.line("Timbre model: prewarm joining load started during install wait.")
+            _ = try await loadFlight.task.value
+            return
+        }
+
         guard loader.cacheExists() else {
             state = .notInstalled
             progress = .idle
