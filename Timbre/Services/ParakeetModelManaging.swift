@@ -1,5 +1,19 @@
 import Foundation
 
+enum ParakeetModelError: Error, Equatable, LocalizedError {
+    case modelNotInstalled
+    case transientLoadFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .modelNotInstalled:
+            return "Parakeet model is not installed."
+        case .transientLoadFailed(let message):
+            return message
+        }
+    }
+}
+
 /// Shared Parakeet model lifecycle: install/verify on disk, optionally load into memory.
 /// Views must not depend on FluidAudio types; only services call loading APIs on the concrete manager.
 @MainActor
@@ -13,6 +27,9 @@ protocol ParakeetModelManaging: AnyObject {
 
     /// Single-flight download + verify-load + release. Ends in `installed` (not `loaded`).
     func ensureInstalled() async throws
+
+    /// Single-flight load from an already-installed cache and retain in memory. Never downloads.
+    func loadInstalledAndRetain() async throws
 
     /// Drop any retained in-memory manager. Leaves state as `installed` when files remain.
     func unload()

@@ -28,11 +28,12 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
     }
 
     func prepare() async throws {
-#if !arch(arm64)
-        throw TranscriptionError.recognitionFailed("Parakeet models require Apple Silicon.")
-#endif
+#if arch(arm64)
         try await audioSource.prepareAccess()
         _ = try await modelManager.ensureLoaded()
+#else
+        throw TranscriptionError.recognitionFailed("Parakeet models require Apple Silicon.")
+#endif
     }
 
     func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
@@ -107,7 +108,11 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         let transcriptionStarted = Date()
         let task = Task<ASRResult, Error> {
             var decoderState = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
-            return try await manager.transcribe(samples, decoderState: &decoderState)
+            return try await manager.transcribe(
+                samples,
+                decoderState: &decoderState,
+                language: nil
+            )
         }
         inferenceTask = task
 

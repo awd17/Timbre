@@ -53,12 +53,13 @@ Shared `ParakeetModelManager` owns the lifecycle:
 - Cache: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 - Constructing the manager/service at launch does **not** download or load the model.
 - Setup calls `ensureInstalled()`: verify then **release** memory.
-- Dictation `prepare()` calls `ensureLoaded()` and **retains** `AsrManager` across sessions.
+- After readiness, `ParakeetPrewarmCoordinator` calls `loadInstalledAndRetain()` (disk only; never downloads).
+- Dictation `prepare()` calls `ensureLoaded()` (joins prewarm if in flight) and **retains** `AsrManager` across sessions.
 - Cancelling a dictation session does **not** cancel shared model preparation.
 
 Requires Apple Silicon.
 
-See [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md).
+See [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md) and [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md).
 
 ## Fixture gate
 
@@ -109,12 +110,13 @@ Timbre maps shorter captures to `TranscriptionError.emptyResult` (no clipboard w
 - Batch after Stop only (no live partials, streaming, VAD, or auto-stop)
 - Apple Silicon required
 - First model download is large (~464 MB)
-- First Start may be slow while the model loads into memory (prewarming is the next PR)
+- After readiness, the model is prewarmed into memory; Start during an active prewarm may still show Preparing until the shared load finishes (see [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md))
 - Some apps may ignore synthetic Command-V; clipboard fallback always retains the transcript
 
 ## Related
 
 - Smoke CLI (file-only): [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md)
 - Setup / model management: [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md)
+- Model prewarming: [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md)
 - Focused-app insertion: [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md)
 - Project status: [`PROJECT_STATUS.md`](PROJECT_STATUS.md)

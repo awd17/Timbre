@@ -8,7 +8,7 @@ Developer notes for Timbre’s Accessibility-gated insertion of completed dictat
 - The transcript **always** remains on the clipboard after a successful non-empty transcription.
 - Accessibility permission is **required** for normal production dictation readiness.
 - Automatic insertion uses `NSPasteboard` + `CGEvent` Command-V — not direct AX text replacement.
-- Next PR: reduce slow first-Start latency (model prewarming). Onboarding polish and shortcut customization remain later work.
+- Model prewarming after setup readiness is documented in [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md). Onboarding polish and shortcut customization remain later work.
 
 ## End-to-end loop
 
@@ -135,4 +135,4 @@ Known limitations:
 
 ## Out of scope
 
-Model prewarming, shortcut recorder, hold-to-talk, floating panel, direct AX text set, selection rewrite, LLM/TTS, rich text, packaging/signing, onboarding/menu redesign.
+Shortcut recorder, hold-to-talk, floating panel, direct AX text set, selection rewrite, LLM/TTS, rich text, packaging/signing, onboarding/menu redesign.

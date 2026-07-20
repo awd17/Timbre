@@ -67,6 +67,7 @@ Parakeet is the default engine in **Debug and Release**. No backend launch argum
 | `--parakeet-transcription` | Deprecated no-op. Parakeet is already the default; logged once. |
 | `--debug-window` | Debug only. Opens the Timbre Debug window. |
 | `--disable-setup` | Debug only. Disables the automatic first-run setup window. |
+| `--disable-model-prewarm` | Debug only. Disables background model prewarming (Start still loads via `ensureLoaded`). |
 
 Release builds ignore all of the DEBUG-only flags above.
 
@@ -82,10 +83,11 @@ DEBUG flag priority when several are present: fixture → mock → apple-speech 
 ## Parakeet / FluidAudio
 
 Production dictation is Parakeet v2 batch transcription (no live partials).  
-First Start loads the installed model into memory (`ensureLoaded`); later sessions reuse it.  
+After setup readiness, Timbre **prewarms** the installed model into memory in the background (`loadInstalledAndRetain`).
+Start uses `ensureLoaded` and joins any in-flight prewarm; later sessions reuse the retained manager.
 Setup installs and verifies the model on disk (`ensureInstalled`) without keeping it loaded.
 
-Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md) and [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md).
+Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md), [`docs/MODEL_PREWARMING.md`](docs/MODEL_PREWARMING.md), and [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md).
 
 ### Clean Release verification
 
