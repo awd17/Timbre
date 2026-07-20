@@ -6,7 +6,7 @@ Developer notes for Timbre’s system-wide Start/Stop hotkey.
 
 - Toggle hotkey is wired through `DictationShortcutCoordinator` into the existing `AssistantController` workflow.
 - Temporary pre-release default: **Control+Shift+D** (`⌃⇧D`).
-- Transcripts are still copied to the clipboard (no focused-app insertion yet).
+- Completed transcripts are copied to the clipboard and inserted into the captured target when safe (see [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md)).
 - Shortcut customization UI is **not** implemented.
 - Before the first public release, the onboarding-polish PR **must** add `KeyboardShortcuts.Recorder` so the user can confirm or choose the shortcut.
 
@@ -87,17 +87,19 @@ Uses `FakeGlobalShortcutService` — no real system hotkeys.
 1. Build Debug and Release.
 2. Launch Timbre; complete setup if needed.
 3. Focus TextEdit; press ⌃⇧D → Preparing/Listening without opening the menu.
-4. Speak; press ⌃⇧D again → Processing → clipboard.
-5. Paste into TextEdit.
+4. Speak; press ⌃⇧D again → Processing → text inserted into TextEdit (and still on clipboard).
+5. Confirm clipboard still holds the transcript; Copy Again does not paste again.
 6. Start a second session via the hotkey (model reuse).
 7. Mash during Processing → no overlapping session.
-8. Reset setup → hotkey does not bypass onboarding.
-9. Close setup during download → hotkey no-ops; download continues.
-10. Menu Start/Stop still behave the same.
-11. DEBUG `--mock-transcription` toggle works.
-12. `--parakeet-fixture` skips global shortcut registration.
+8. Switch apps during Processing → no paste into the newly active app; transcript remains on clipboard.
+9. Reset setup → hotkey does not bypass onboarding.
+10. Close setup during download → hotkey no-ops; download continues.
+11. Menu Start/Stop still behave the same (menu path may briefly reactivate the captured target).
+12. DEBUG `--mock-transcription` toggle works without posting real paste events.
+13. `--parakeet-fixture` skips global shortcut registration.
 
 ## Related
 
-- Next PR: insert transcript into the focused application.
+- Focused-app insertion: [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md).
+- Next PR: reduce slow first-Start latency (model prewarming).
 - Later: onboarding polish with `KeyboardShortcuts.Recorder`.

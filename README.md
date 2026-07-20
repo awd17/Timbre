@@ -3,8 +3,8 @@
 Menu-bar voice dictation for macOS.  
 Start a session from the status item, or press **Control+Shift+D** (`⌃⇧D`) from anywhere.  
 Speak, then stop (menu or the same shortcut).  
-The app transcribes locally with Parakeet and copies the text to the clipboard.  
-Paste manually where you need it (automatic insertion is not implemented yet).
+The app transcribes locally with Parakeet, copies the text to the clipboard, and inserts it into the app you were using when you started (Accessibility permission required).
+The transcript also remains on the clipboard for Copy Again or manual paste if insertion cannot safely run.
 
 **Repository:** https://github.com/awd17/Timbre
 
@@ -17,6 +17,7 @@ For feature status, architecture, and contributor rules, see [`docs/PROJECT_STAT
 - Xcode 16 or later
 - An Apple Development signing team for local runs
 - Microphone permission for normal use
+- Accessibility permission for inserting text into other apps
 
 Speech Recognition permission is only needed for the DEBUG `--apple-speech` comparison backend.
 
@@ -49,7 +50,7 @@ xcodebuild -scheme Timbre -destination 'platform=macOS' test
 ## Run
 
 In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
-On first launch (when the model is not installed), complete setup: microphone → download/verify → Done.  
+On first launch (when the model is not installed), complete setup: microphone → text insertion → download/verify → Done.
 Open the waveform status item, or use the global shortcut **⌃⇧D** to Start/Stop without opening the menu.  
 Use Start, Stop, Copy Again, or Quit in the menu as before.
 
@@ -59,7 +60,7 @@ Parakeet is the default engine in **Debug and Release**. No backend launch argum
 
 | Launch argument | Effect |
 |-----------------|--------|
-| *(none)* | Parakeet batch dictation + microphone. Setup appears when the model or mic is not ready. |
+| *(none)* | Parakeet batch dictation + microphone. Setup appears when the model, mic, or Accessibility is not ready. |
 | `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup. |
 | `--apple-speech` | Debug only. Apple Speech comparison backend. Disables Parakeet setup. |
 | `--parakeet-fixture` | Debug only. Run the committed WAV through the app path (no mic). Disables automatic setup. |
@@ -88,10 +89,11 @@ Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.
 
 ### Clean Release verification
 
-Reset microphone TCC and local state, then exercise the **Release** product (not only Debug with simulated flags):
+Reset microphone and Accessibility TCC and local state, then exercise the **Release** product (not only Debug with simulated flags):
 
 ```bash
 tccutil reset Microphone com.augustdrakton.Timbre
+tccutil reset Accessibility com.augustdrakton.Timbre
 # Optional if comparing DEBUG Apple Speech leftovers:
 tccutil reset SpeechRecognition com.augustdrakton.Timbre
 
@@ -102,7 +104,9 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 # Launch the Release .app from DerivedData Build/Products/Release/Timbre.app
 ```
 
-Confirm: setup appears; microphone is requested; Speech Recognition is not; Start/Stop produces a clipboard transcript; DEBUG flags passed to the Release binary do not change backend or bypass setup.
+Confirm: setup appears; microphone then text insertion are requested before download; Start/Stop inserts into the focused app and keeps the transcript on the clipboard; DEBUG flags passed to the Release binary do not change backend or bypass setup.
+
+Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md), [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md), and [`docs/FOCUSED_APP_TEXT_INSERTION.md`](docs/FOCUSED_APP_TEXT_INSERTION.md).
 
 ### Smoke CLI
 

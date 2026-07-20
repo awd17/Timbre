@@ -10,7 +10,7 @@ Timbre is a menu-bar voice dictation app for macOS.
 The user starts a session from the status item or the global shortcut.  
 The app shows a listening/processing status for Parakeet batch dictation (no live partials).  
 The user stops the session.  
-The app copies the final text to the clipboard.
+The app copies the final text to the clipboard and inserts it into the captured target application when Accessibility trust and target validation allow.
 
 ## Current release
 
@@ -30,7 +30,9 @@ The UI and the controller do not depend on a specific speech engine.
 - Start and stop dictation from the menu UI
 - Parakeet batch transcription after Stop (production default)
 - Copy to clipboard and Copy Again
+- **Focused-app text insertion** via clipboard + Command-V (Accessibility required)
 - Microphone permission for the production path
+- Accessibility permission for text insertion
 - Swappable transcription protocol
 - Mock transcription in DEBUG builds
 - Debug window for UI tests in DEBUG builds
@@ -38,8 +40,8 @@ The UI and the controller do not depend on a specific speech engine.
 - Parakeet / FluidAudio model download, load, and file-transcription smoke CLI
 - Fixture-through-app gate via `--parakeet-fixture` (service → controller → clipboard)
 - **Shared `ParakeetModelManager`** with installed vs loaded states (`ensureInstalled` / `ensureLoaded`)
-- **First-run setup in Debug and Release** (welcome → mic → download/verify → ready)
-- Dictation readiness requires installed model **and** granted microphone permission
+- **First-run setup in Debug and Release** (welcome → mic → text insertion → download/verify → ready)
+- Dictation readiness requires installed model, granted microphone, **and** Accessibility trust
 - **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; toggle Start/Stop)
 
 ### Not started / out of this milestone
@@ -48,7 +50,7 @@ The UI and the controller do not depend on a specific speech engine.
 - Full Settings screen / user model controls
 - Shortcut customization UI (`KeyboardShortcuts.Recorder` — required before public release)
 - Floating panel
-- Paste into the focused app
+- Model prewarming / first-Start latency reduction (next PR)
 - Read or replace selected text
 - Text rewrite and LLM features
 - Assistant mode and CUA
@@ -66,8 +68,9 @@ The app is small and layered.
 2. `AssistantController` owns the session workflow.
 3. Transcription uses `TranscriptionServicing`.
 4. Clipboard uses `ClipboardServicing`.
-5. `ParakeetModelManager` owns model install/load; setup and Parakeet dictation share it.
-6. `DictationShortcutCoordinator` maps hotkey presses to Start/Stop/setup (no FluidAudio coupling).
+5. Transcript delivery uses `TranscriptDeliveryServicing` (clipboard + Accessibility + Command-V).
+6. `ParakeetModelManager` owns model install/load; setup and Parakeet dictation share it.
+7. `DictationShortcutCoordinator` maps hotkey presses to Start/Stop/setup (no FluidAudio coupling).
 
 Backends:
 
@@ -109,6 +112,10 @@ Timbre/
     ParakeetModelManager.swift
     ModelPreparationState.swift
     MicrophonePermissionProviding.swift
+    AccessibilityPermissionProviding.swift
+    DictationTargetProviding.swift
+    TranscriptDeliveryServicing.swift
+    FocusedApplicationTextOutputService.swift
     ClipboardServicing.swift
     ClipboardService.swift
   Shortcuts/
@@ -132,6 +139,7 @@ docs/PARAKEET_SMOKE_TEST.md
 docs/PARAKEET_MICROPHONE_DICTATION.md
 docs/SETUP_AND_MODEL_MANAGEMENT.md
 docs/GLOBAL_DICTATION_SHORTCUT.md
+docs/FOCUSED_APP_TEXT_INSERTION.md
 TimbreTests/
 TimbreUITests/
 ```
@@ -149,6 +157,7 @@ TimbreUITests/
 - Keep the Parakeet smoke CLI working when changing FluidAudio usage.
 - Keep permission strings in the Xcode target Info settings.
 - Keep App Sandbox off unless a later task requires it.
+- Do not paste when a different third-party app is frontmost; always keep successful transcripts on the clipboard.
 
 ## Out of scope
 
@@ -156,7 +165,8 @@ Do not start these items unless a task asks for them:
 
 - Live Parakeet partials / streaming ASR
 - Shortcut Recorder / onboarding shortcut picker
-- Accessibility paste
+- Model prewarming / first-Start latency reduction (next focused PR)
+- Direct AX text replacement / selection rewrite
 - Full Settings screens
 - Authentication
 - Billing
@@ -175,6 +185,7 @@ Do not start these items unless a task asks for them:
 9. The project added gated first-run setup and a shared Parakeet model manager (installed vs loaded).
 10. The project made Parakeet the production default and enabled setup in Release.
 11. The project added a global dictation toggle shortcut (temporary ⌃⇧D).
+12. The project added focused-app text insertion (Accessibility + clipboard Command-V).
 
 ## Related docs
 
@@ -183,4 +194,5 @@ Do not start these items unless a task asks for them:
 - Parakeet app mic path: `docs/PARAKEET_MICROPHONE_DICTATION.md`
 - Setup / model management: `docs/SETUP_AND_MODEL_MANAGEMENT.md`
 - Global shortcut: `docs/GLOBAL_DICTATION_SHORTCUT.md`
+- Focused-app insertion: `docs/FOCUSED_APP_TEXT_INSERTION.md`
 - Repository: https://github.com/awd17/Timbre

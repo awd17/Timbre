@@ -13,6 +13,10 @@ struct SetupFlowView: View {
                 microphone
             case .microphoneDenied:
                 microphoneDenied
+            case .textInsertion:
+                textInsertion
+            case .textInsertionDenied:
+                textInsertionDenied
             case .preparing:
                 preparing
             case .ready:
@@ -68,6 +72,43 @@ struct SetupFlowView: View {
                 Spacer()
                 Button("Try Again") {
                     coordinator.retryMicrophone()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var textInsertion: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Allow Text Insertion")
+                .font(.title3.weight(.semibold))
+            Text("Timbre needs permission to insert your dictation into other apps.")
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            HStack {
+                Spacer()
+                Button("Continue") {
+                    coordinator.requestTextInsertionAccess()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+
+    private var textInsertionDenied: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Allow Text Insertion")
+                .font(.title3.weight(.semibold))
+            Text("Text insertion access is turned off. Enable Timbre in System Settings to continue.")
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+            HStack {
+                Button("Open System Settings") {
+                    coordinator.openAccessibilitySettings()
+                }
+                Spacer()
+                Button("Try Again") {
+                    coordinator.requestTextInsertionAccess()
                 }
                 .keyboardShortcut(.defaultAction)
             }

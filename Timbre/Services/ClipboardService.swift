@@ -2,10 +2,17 @@ import AppKit
 import Foundation
 
 struct ClipboardService: ClipboardServicing {
+    private let pasteboard: NSPasteboard
+
+    init(pasteboard: NSPasteboard = .general) {
+        self.pasteboard = pasteboard
+    }
+
     @MainActor
-    func copy(_ string: String) {
-        let pasteboard = NSPasteboard.general
+    @discardableResult
+    func copy(_ string: String) -> Bool {
         pasteboard.clearContents()
-        pasteboard.setString(string, forType: .string)
+        return pasteboard.setString(string, forType: .string)
+            && pasteboard.string(forType: .string) == string
     }
 }
