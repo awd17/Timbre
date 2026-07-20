@@ -192,10 +192,3 @@ final class ParakeetPrewarmCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.state, .loaded)
     }
 }
-
-@MainActor
-private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
-    while !condition() {
-        await Task.yield()
-    }
-}

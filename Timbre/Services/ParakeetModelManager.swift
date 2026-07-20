@@ -60,6 +60,11 @@ final class ParakeetModelManager: ParakeetModelManaging {
         case downloadedCache(Error)
     }
 
+    private enum LoadFailureResolution {
+        case recovered(any ParakeetASRManaging)
+        case failed(Error)
+    }
+
     init(loader: (any ParakeetModelLoading)? = nil) {
         self.loader = loader ?? FluidAudioParakeetModelLoader(version: Self.modelVersion)
         refreshAvailability()
@@ -136,7 +141,7 @@ final class ParakeetModelManager: ParakeetModelManaging {
             }
         }
 
-        var mayRepairInvalidCache = true
+        var hasAttemptedRepair = false
         while true {
             if let asrManager {
                 state = .loaded
@@ -155,10 +160,11 @@ final class ParakeetModelManager: ParakeetModelManaging {
 
             do {
                 return try await flight.task.value
-            } catch ParakeetModelError.modelNotInstalled where mayRepairInvalidCache {
-                // A cached-only flight may discover corruption after Start has joined it.
-                // Its owner invalidates the cache; Start then owns the one repair download.
-                mayRepairInvalidCache = false
+            } catch ParakeetModelError.modelNotInstalled where !hasAttemptedRepair {
+                // Either a joined prewarm flight or ensureLoaded's own flight can discover
+                // and invalidate an existing corrupt cache. Allow exactly one clean-download
+                // flight after that transition; a second modelNotInstalled error is terminal.
+                hasAttemptedRepair = true
                 TimbreLog.line("Timbre model: retrying with a clean download after invalid cache.")
             } catch {
                 throw error
@@ -223,7 +229,9 @@ final class ParakeetModelManager: ParakeetModelManaging {
                     finishInstallation()
                     return
                 } catch {
-                    if await loader.cacheIsValid() {
+                    // ensureInstalled proves disk readiness only; unlike a retained load
+                    // flight, it deliberately releases the manager created by validation.
+                    if await loader.loadValidatedCache() != nil {
                         TimbreLog.line(
                             "Timbre model: existing install verified on retry after a transient load failure."
                         )
@@ -245,7 +253,8 @@ final class ParakeetModelManager: ParakeetModelManaging {
             do {
                 _ = try await loader.loadCached(progressHandler: makeProgressHandler())
             } catch {
-                if await hasValidCache() {
+                // Keep ensureInstalled's disk-only memory contract on validation retry.
+                if await validatedCacheManager() != nil {
                     TimbreLog.line(
                         "Timbre model: downloaded install verified on retry after a transient load failure."
                     )
@@ -295,9 +304,14 @@ final class ParakeetModelManager: ParakeetModelManaging {
                 completeLoadFlight(id: id, manager: manager)
                 return manager
             } catch {
-                let normalized = await normalizeLoadFailure(error)
-                completeFailedLoadFlight(id: id)
-                throw normalized
+                switch await normalizeLoadFailure(error) {
+                case .recovered(let manager):
+                    completeLoadFlight(id: id, manager: manager)
+                    return manager
+                case .failed(let normalized):
+                    completeFailedLoadFlight(id: id)
+                    throw normalized
+                }
             }
         }
 
@@ -365,7 +379,7 @@ final class ParakeetModelManager: ParakeetModelManaging {
         loadFlight = nil
     }
 
-    private func normalizeLoadFailure(_ error: Error) async -> Error {
+    private func normalizeLoadFailure(_ error: Error) async -> LoadFailureResolution {
         if let modelError = error as? ParakeetModelError {
             switch modelError {
             case .modelNotInstalled:
@@ -373,7 +387,7 @@ final class ParakeetModelManager: ParakeetModelManaging {
             case .transientLoadFailed:
                 state = .installed
             }
-            return modelError
+            return .failed(modelError)
         }
 
         switch error {
@@ -381,55 +395,53 @@ final class ParakeetModelManager: ParakeetModelManaging {
             return await normalizeCachedLoadFailure(underlying)
 
         case LoadAttemptError.download(let underlying):
-            return downloadFailure(underlying)
+            return .failed(downloadFailure(underlying))
 
         case LoadAttemptError.downloadedCache(let underlying):
-            if await hasValidCache() {
-                state = .installed
+            if let manager = await validatedCacheManager() {
                 TimbreLog.line(
-                    "Timbre model: transient load failure after download; cache validated — \(underlying.localizedDescription)"
+                    "Timbre model: recovered transient load failure after download with validated manager — \(underlying.localizedDescription)"
                 )
-                return ParakeetModelError.transientLoadFailed(
-                    underlying.localizedDescription
-                )
+                return .recovered(manager)
             }
             try? loader.invalidateCache()
-            return downloadFailure(underlying)
+            return .failed(downloadFailure(underlying))
 
         default:
             return await normalizeCachedLoadFailure(error)
         }
     }
 
-    private func normalizeCachedLoadFailure(_ error: Error) async -> Error {
+    private func normalizeCachedLoadFailure(_ error: Error) async -> LoadFailureResolution {
         guard loader.cacheExists() else {
             state = .notInstalled
             TimbreLog.line("Timbre model: cached load failed because files disappeared.")
-            return ParakeetModelError.modelNotInstalled
+            return .failed(ParakeetModelError.modelNotInstalled)
         }
 
-        if await loader.cacheIsValid() {
-            state = .installed
+        if let manager = await loader.loadValidatedCache() {
             TimbreLog.line(
-                "Timbre model: transient load failure; cache validated — \(error.localizedDescription)"
+                "Timbre model: recovered transient load failure with validated manager — \(error.localizedDescription)"
             )
-            return ParakeetModelError.transientLoadFailed(error.localizedDescription)
+            return .recovered(manager)
         }
 
         do {
             try invalidateCache(after: error)
-            return ParakeetModelError.modelNotInstalled
+            return .failed(ParakeetModelError.modelNotInstalled)
         } catch {
             state = .failed(message: Self.userFacingFailure)
-            return TranscriptionError.recognitionFailed(
-                "Parakeet cache could not be repaired: \(error.localizedDescription)"
+            return .failed(
+                TranscriptionError.recognitionFailed(
+                    "Parakeet cache could not be repaired: \(error.localizedDescription)"
+                )
             )
         }
     }
 
-    private func hasValidCache() async -> Bool {
-        guard loader.cacheExists() else { return false }
-        return await loader.cacheIsValid()
+    private func validatedCacheManager() async -> (any ParakeetASRManaging)? {
+        guard loader.cacheExists() else { return nil }
+        return await loader.loadValidatedCache()
     }
 
     private func invalidateCache(after loadError: Error) throws {

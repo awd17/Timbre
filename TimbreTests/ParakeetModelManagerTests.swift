@@ -40,7 +40,7 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
     }
 
     var cacheExistsValue: Bool
-    var cacheIsValidValue = true
+    var validationSucceeds = true
     var loadOutcomes: [LoadOutcome] = [.success]
     var downloadError: Error?
     var invalidateError: Error?
@@ -65,9 +65,9 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
         cacheExistsValue
     }
 
-    func cacheIsValid() async -> Bool {
+    func loadValidatedCache() async -> (any ParakeetASRManaging)? {
         validationCallCount += 1
-        return cacheIsValidValue
+        return validationSucceeds ? FakeParakeetASRManager() : nil
     }
 
     func invalidateCache() throws {
@@ -172,7 +172,7 @@ final class ParakeetModelManagerTests: XCTestCase {
 
     func testCorruptCacheIsInvalidatedInsteadOfRemainingInstalled() async {
         let loader = FakeParakeetModelLoader(cacheExists: true)
-        loader.cacheIsValidValue = false
+        loader.validationSucceeds = false
         loader.loadOutcomes = [.failure(ModelLoaderTestError.loadFailed)]
         let manager = ParakeetModelManager(loader: loader)
 
@@ -189,30 +189,24 @@ final class ParakeetModelManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .notInstalled)
     }
 
-    func testValidatedCacheFailureRemainsRetryableWithoutInvalidation() async {
+    func testTransientCachedLoadReusesValidatedManager() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: true)
-        loader.cacheIsValidValue = true
+        loader.validationSucceeds = true
         loader.loadOutcomes = [.failure(ModelLoaderTestError.loadFailed)]
         let manager = ParakeetModelManager(loader: loader)
 
-        do {
-            try await manager.loadInstalledAndRetain()
-            XCTFail("Expected transient cache load failure.")
-        } catch {
-            XCTAssertEqual(
-                error as? ParakeetModelError,
-                .transientLoadFailed("load failed")
-            )
-        }
+        try await manager.loadInstalledAndRetain()
+        _ = try await manager.ensureLoaded()
 
         XCTAssertEqual(loader.validationCallCount, 1)
+        XCTAssertEqual(loader.loadCallCount, 1)
         XCTAssertEqual(loader.invalidationCallCount, 0)
-        XCTAssertEqual(manager.state, .installed)
+        XCTAssertEqual(manager.state, .loaded)
     }
 
     func testStartJoiningCorruptPrewarmRepairsWithOneDownload() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: true)
-        loader.cacheIsValidValue = false
+        loader.validationSucceeds = false
         loader.suspendsLoad = true
         loader.loadOutcomes = [
             .failure(ModelLoaderTestError.loadFailed),
@@ -245,6 +239,23 @@ final class ParakeetModelManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .loaded)
     }
 
+    func testEnsureLoadedRepairsCorruptCacheDiscoveredByOwnedFlight() async throws {
+        let loader = FakeParakeetModelLoader(cacheExists: true)
+        loader.validationSucceeds = false
+        loader.loadOutcomes = [
+            .failure(ModelLoaderTestError.loadFailed),
+            .success,
+        ]
+        let manager = ParakeetModelManager(loader: loader)
+
+        _ = try await manager.ensureLoaded()
+
+        XCTAssertEqual(loader.invalidationCallCount, 1)
+        XCTAssertEqual(loader.downloadCallCount, 1)
+        XCTAssertEqual(loader.loadCallCount, 2)
+        XCTAssertEqual(manager.state, .loaded)
+    }
+
     func testConcurrentEnsureInstalledUsesProductionSingleFlight() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: false)
         loader.suspendsDownload = true
@@ -267,7 +278,7 @@ final class ParakeetModelManagerTests: XCTestCase {
 
     func testEnsureInstalledRepairsExistingCorruptCache() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: true)
-        loader.cacheIsValidValue = false
+        loader.validationSucceeds = false
         loader.loadOutcomes = [
             .failure(ModelLoaderTestError.loadFailed),
             .success,
@@ -290,7 +301,7 @@ final class ParakeetModelManagerTests: XCTestCase {
 
     func testEnsureInstalledAcceptsCacheThatValidatesOnRetry() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: true)
-        loader.cacheIsValidValue = true
+        loader.validationSucceeds = true
         loader.loadOutcomes = [.failure(ModelLoaderTestError.loadFailed)]
         let manager = ParakeetModelManager(loader: loader)
 

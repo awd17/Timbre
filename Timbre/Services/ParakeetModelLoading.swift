@@ -22,7 +22,7 @@ extension AsrManager: ParakeetASRManaging {}
 @MainActor
 protocol ParakeetModelLoading: AnyObject {
     func cacheExists() -> Bool
-    func cacheIsValid() async -> Bool
+    func loadValidatedCache() async -> (any ParakeetASRManaging)?
     func invalidateCache() throws
 
     func download(progressHandler: ProgressHandler?) async throws
@@ -45,23 +45,18 @@ final class FluidAudioParakeetModelLoader: ParakeetModelLoading {
         AsrModels.modelsExist(at: cacheDirectory, version: version)
     }
 
-    func cacheIsValid() async -> Bool {
+    func loadValidatedCache() async -> (any ParakeetASRManaging)? {
         do {
-            try requireAppleSilicon()
             // `modelsExist` only checks paths, and FluidAudio's lightweight model
             // validation does not parse the vocabulary. A full load is the only
-            // authoritative check that every cached artifact is usable.
-            _ = try await AsrModels.load(
-                from: cacheDirectory,
-                version: version,
-                progressHandler: nil
-            )
-            return true
+            // authoritative check that every cached artifact is usable. Return the
+            // resulting manager so retained-load recovery does not compile it again.
+            return try await loadCached(progressHandler: nil)
         } catch {
             TimbreLog.line(
                 "Timbre model: cache validation failed — \(error.localizedDescription)"
             )
-            return false
+            return nil
         }
     }
 

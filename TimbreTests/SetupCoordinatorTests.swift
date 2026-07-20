@@ -648,13 +648,6 @@ final class SetupCoordinatorTests: XCTestCase {
     }
 }
 
-@MainActor
-private func waitUntil(_ condition: @escaping @MainActor () -> Bool) async {
-    while !condition() {
-        await Task.yield()
-    }
-}
-
 final class ModelPreparationStateTests: XCTestCase {
     func testDerivedFlags() {
         XCTAssertTrue(ModelPreparationState.notInstalled.needsInstall)
