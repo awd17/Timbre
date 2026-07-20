@@ -7,6 +7,19 @@ struct RunningProcessIdentity: Equatable, Sendable {
     let processIdentifier: pid_t
     let bundleIdentifier: String?
     let isTerminated: Bool
+    let launchDate: Date?
+
+    init(
+        processIdentifier: pid_t,
+        bundleIdentifier: String?,
+        isTerminated: Bool,
+        launchDate: Date? = nil
+    ) {
+        self.processIdentifier = processIdentifier
+        self.bundleIdentifier = bundleIdentifier
+        self.isTerminated = isTerminated
+        self.launchDate = launchDate
+    }
 }
 
 @MainActor
@@ -21,7 +34,8 @@ struct WorkspaceRunningProcessLookup: RunningProcessLooking {
         return RunningProcessIdentity(
             processIdentifier: app.processIdentifier,
             bundleIdentifier: app.bundleIdentifier,
-            isTerminated: app.isTerminated
+            isTerminated: app.isTerminated,
+            launchDate: app.launchDate
         )
     }
 }
@@ -45,7 +59,10 @@ struct AccessibilitySecureInputDetector: SecureInputDetecting {
             return false
         }
 
-        let focused = focusedObject as! AXUIElement
+        guard CFGetTypeID(focusedObject) == AXUIElementGetTypeID() else {
+            return false
+        }
+        let focused = unsafeBitCast(focusedObject, to: AXUIElement.self)
         var roleObject: AnyObject?
         let roleResult = AXUIElementCopyAttributeValue(
             focused,
@@ -164,6 +181,13 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
                 TimbreLog.line("Timbre delivery: pid/bundle mismatch; copy only")
                 return .copiedAfterInsertFailure(.ambiguousTargetIdentity)
             }
+        } else {
+            guard let expectedLaunchDate = target.launchDate,
+                  running.launchDate == expectedLaunchDate
+            else {
+                TimbreLog.line("Timbre delivery: pid/launch-date mismatch; copy only")
+                return .copiedAfterInsertFailure(.ambiguousTargetIdentity)
+            }
         }
 
         if let frontmostExternal = targetProvider.frontmostExternalTarget() {
@@ -175,7 +199,7 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
             // MenuBarExtra path: Timbre briefly owns focus. Reactivate only the
             // original captured target — never a different third-party app.
             TimbreLog.line("Timbre delivery: Timbre frontmost; reactivating captured target")
-            guard targetProvider.activateTarget(target) else {
+            guard await targetProvider.activateTarget(target) else {
                 TimbreLog.line("Timbre delivery: target reactivation failed; copy only")
                 return .copiedAfterInsertFailure(.frontmostChanged)
             }
@@ -221,7 +245,10 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
         if captured.processIdentifier != frontmost.processIdentifier {
             return false
         }
-        guard let capturedBundle = captured.bundleIdentifier else { return true }
-        return frontmost.bundleIdentifier == capturedBundle
+        if let capturedBundle = captured.bundleIdentifier {
+            return frontmost.bundleIdentifier == capturedBundle
+        }
+        guard let capturedLaunchDate = captured.launchDate else { return false }
+        return frontmost.launchDate == capturedLaunchDate
     }
 }

@@ -58,7 +58,7 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
         frontmostExternal
     }
 
-    func activateTarget(_ target: DictationTargetContext) -> Bool {
+    func activateTarget(_ target: DictationTargetContext) async -> Bool {
         activateCallCount += 1
         if activateSucceeds {
             frontmostExternal = target

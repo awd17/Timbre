@@ -13,7 +13,7 @@ protocol DictationTargetProviding: AnyObject {
     var isSelfFrontmost: Bool { get }
 
     /// Activates the captured target. Returns true when frontmost matches afterward.
-    func activateTarget(_ target: DictationTargetContext) -> Bool
+    func activateTarget(_ target: DictationTargetContext) async -> Bool
 }
 
 /// Tracks the last activated non-Timbre application.
@@ -30,6 +30,7 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
     private var lastExternalProcessIdentifier: pid_t?
     private var lastExternalBundleIdentifier: String?
     private var lastExternalLocalizedName: String?
+    private var lastExternalLaunchDate: Date?
     private var observer: NSObjectProtocol?
 
     init(
@@ -67,16 +68,33 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
         return context(from: frontmost)
     }
 
-    func activateTarget(_ target: DictationTargetContext) -> Bool {
+    func activateTarget(_ target: DictationTargetContext) async -> Bool {
         guard let running = NSRunningApplication(processIdentifier: target.processIdentifier),
               !running.isTerminated,
-              matches(target, running: running),
-              running.activate(options: [.activateIgnoringOtherApps]),
-              let frontmost = workspace.frontmostApplication
+              matches(target, running: running)
         else {
             return false
         }
-        return matches(target, running: frontmost)
+
+        NSApplication.shared.yieldActivation(to: running)
+        guard running.activate(from: .current, options: []) else { return false }
+
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        repeat {
+            if let frontmost = workspace.frontmostApplication,
+               matches(target, running: frontmost)
+            {
+                return true
+            }
+            guard !running.isTerminated else { return false }
+            do {
+                try await Task.sleep(for: .milliseconds(25))
+            } catch {
+                return false
+            }
+        } while ContinuousClock.now < deadline
+
+        return false
     }
 
     func captureTarget() -> DictationTargetContext? {
@@ -108,6 +126,7 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
         lastExternalProcessIdentifier = context.processIdentifier
         lastExternalBundleIdentifier = context.bundleIdentifier
         lastExternalLocalizedName = context.localizedName
+        lastExternalLaunchDate = context.launchDate
     }
 
     private func lastExternalContext() -> DictationTargetContext? {
@@ -115,11 +134,18 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
         if let running = NSRunningApplication(processIdentifier: pid), !running.isTerminated {
             if let expectedBundle = lastExternalBundleIdentifier {
                 guard running.bundleIdentifier == expectedBundle else { return nil }
+            } else {
+                guard let expectedLaunchDate = lastExternalLaunchDate,
+                      running.launchDate == expectedLaunchDate
+                else {
+                    return nil
+                }
             }
             return DictationTargetContext(
                 processIdentifier: running.processIdentifier,
                 bundleIdentifier: running.bundleIdentifier ?? lastExternalBundleIdentifier,
-                localizedName: running.localizedName ?? lastExternalLocalizedName
+                localizedName: running.localizedName ?? lastExternalLocalizedName,
+                launchDate: running.launchDate
             )
         }
         return nil
@@ -130,7 +156,8 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
         return DictationTargetContext(
             processIdentifier: app.processIdentifier,
             bundleIdentifier: app.bundleIdentifier,
-            localizedName: app.localizedName
+            localizedName: app.localizedName,
+            launchDate: app.launchDate
         )
     }
 
@@ -146,9 +173,10 @@ final class FrontmostApplicationTracker: DictationTargetProviding {
         running: NSRunningApplication
     ) -> Bool {
         guard running.processIdentifier == target.processIdentifier else { return false }
-        if let expected = target.bundleIdentifier, let actual = running.bundleIdentifier {
-            return expected == actual
+        if let expectedBundle = target.bundleIdentifier {
+            return running.bundleIdentifier == expectedBundle
         }
-        return target.bundleIdentifier == nil
+        guard let expectedLaunchDate = target.launchDate else { return false }
+        return running.launchDate == expectedLaunchDate
     }
 }

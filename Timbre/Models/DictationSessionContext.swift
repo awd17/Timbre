@@ -4,6 +4,19 @@ struct DictationTargetContext: Equatable, Sendable {
     let processIdentifier: pid_t
     let bundleIdentifier: String?
     let localizedName: String?
+    let launchDate: Date?
+
+    init(
+        processIdentifier: pid_t,
+        bundleIdentifier: String?,
+        localizedName: String?,
+        launchDate: Date? = nil
+    ) {
+        self.processIdentifier = processIdentifier
+        self.bundleIdentifier = bundleIdentifier
+        self.localizedName = localizedName
+        self.launchDate = launchDate
+    }
 }
 
 struct DictationSessionContext: Equatable, Sendable {

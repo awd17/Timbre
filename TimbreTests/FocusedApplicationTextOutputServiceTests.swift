@@ -164,6 +164,41 @@ final class FocusedApplicationTextOutputServiceTests: XCTestCase {
         XCTAssertEqual(poster.postCount, 0)
     }
 
+    func testRecycledPidForBundlelessTargetCopiesOnly() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let capturedLaunchDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let replacementLaunchDate = Date(timeIntervalSinceReferenceDate: 2_000)
+        let target = DictationTargetContext(
+            processIdentifier: 99,
+            bundleIdentifier: nil,
+            localizedName: "Helper",
+            launchDate: capturedLaunchDate
+        )
+        let lookup = FakeRunningProcessLookup()
+        lookup.processes[99] = RunningProcessIdentity(
+            processIdentifier: 99,
+            bundleIdentifier: nil,
+            isTerminated: false,
+            launchDate: replacementLaunchDate
+        )
+        let targets = FakeDictationTargetProvider()
+        targets.frontmostExternal = target
+        let poster = FakePasteCommandPoster()
+        let service = makeService(
+            clipboard: ClipboardService(pasteboard: pasteboard),
+            pasteboard: pasteboard,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
+            targets: targets,
+            poster: poster,
+            processLookup: lookup
+        )
+
+        let result = await service.deliver("hello", to: target)
+
+        XCTAssertEqual(result, .copiedAfterInsertFailure(.ambiguousTargetIdentity))
+        XCTAssertEqual(poster.postCount, 0)
+    }
+
     func testSelfFrontmostReactivatesCapturedTarget() async {
         let pasteboard = NSPasteboard.withUniqueName()
         let targets = FakeDictationTargetProvider()
