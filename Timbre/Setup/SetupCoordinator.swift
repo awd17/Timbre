@@ -4,12 +4,147 @@ enum SetupFlowStep: Equatable {
     case welcome
     case microphone
     case microphoneDenied
+    case textInsertion
+    case textInsertionDenied
     case preparing
     case ready
     case failed
 }
 
-/// Coordinates first-run setup: welcome → mic → install → ready.
+private struct SetupFacts: Equatable {
+    let completedWelcome: Bool
+    let dismissedReady: Bool
+    let microphone: MicrophonePermissionStatus
+    let accessibility: AccessibilityTrustState
+    let accessibilityPromptOffered: Bool
+    let model: ModelPreparationState
+}
+
+private enum SetupEffect: Equatable {
+    case none
+    case requestMicrophone
+    case requestAccessibility
+    case installModel
+}
+
+private enum SetupIntent {
+    case refresh
+    case continueWelcome
+    case requestMicrophone
+    case requestAccessibility
+    case retryInstall
+    case acknowledgeReady
+}
+
+private struct SetupDecision: Equatable {
+    let step: SetupFlowStep
+    let effect: SetupEffect
+}
+
+private struct SetupMenuChrome: Equatable {
+    let actionTitle: String?
+    let statusText: String?
+}
+
+private enum SetupPolicy {
+    static func decision(for facts: SetupFacts) -> SetupDecision {
+        guard facts.completedWelcome || facts.dismissedReady || facts.model.isInstalled else {
+            return SetupDecision(step: .welcome, effect: .none)
+        }
+
+        switch facts.microphone {
+        case .undetermined:
+            return SetupDecision(step: .microphone, effect: .requestMicrophone)
+        case .denied:
+            return SetupDecision(step: .microphoneDenied, effect: .none)
+        case .granted:
+            break
+        }
+
+        guard facts.accessibility == .trusted else {
+            let step: SetupFlowStep = facts.accessibilityPromptOffered
+                ? .textInsertionDenied
+                : .textInsertion
+            return SetupDecision(step: step, effect: .none)
+        }
+
+        switch facts.model {
+        case .installed, .loaded:
+            return SetupDecision(step: .ready, effect: .none)
+        case .loading where facts.dismissedReady:
+            return SetupDecision(step: .ready, effect: .none)
+        case .loading, .downloading:
+            return SetupDecision(step: .preparing, effect: .none)
+        case .checking, .notInstalled:
+            return SetupDecision(step: .preparing, effect: .installModel)
+        case .failed:
+            return SetupDecision(step: .failed, effect: .none)
+        }
+    }
+
+    static func allowsDictation(_ facts: SetupFacts) -> Bool {
+        guard facts.microphone == .granted, facts.accessibility == .trusted else {
+            return false
+        }
+        switch facts.model {
+        case .installed, .loaded:
+            return true
+        case .loading:
+            return facts.dismissedReady
+        case .checking, .notInstalled, .downloading, .failed:
+            return false
+        }
+    }
+
+    static func shouldAutoPresent(_ facts: SetupFacts) -> Bool {
+        !facts.dismissedReady || !allowsDictation(facts)
+    }
+
+    static func menuChrome(for facts: SetupFacts) -> SetupMenuChrome {
+        if allowsDictation(facts) {
+            return SetupMenuChrome(actionTitle: nil, statusText: nil)
+        }
+
+        if facts.model.isInstalling {
+            return SetupMenuChrome(
+                actionTitle: "Getting Ready…",
+                statusText: "Getting ready…"
+            )
+        }
+
+        if case .failed = facts.model,
+           facts.microphone == .granted,
+           facts.accessibility == .trusted
+        {
+            return SetupMenuChrome(
+                actionTitle: "Setup Failed — Try Again…",
+                statusText: "Setup failed"
+            )
+        }
+
+        let status: String?
+        if facts.model.isInstalled || facts.model == .loading {
+            switch facts.microphone {
+            case .denied:
+                status = "Microphone access required"
+            case .undetermined:
+                status = "Microphone permission needed"
+            case .granted where facts.accessibility == .notTrusted:
+                status = "Text insertion permission needed"
+            case .granted:
+                status = "Ready"
+            }
+        } else if facts.model == .checking {
+            status = nil
+        } else {
+            status = "Setup required"
+        }
+
+        return SetupMenuChrome(actionTitle: "Finish Setup…", statusText: status)
+    }
+}
+
+/// Coordinates first-run setup: welcome → mic → text insertion → install → ready.
 /// Closing the UI must not cancel `ParakeetModelManaging.ensureInstalled()`.
 @MainActor
 @Observable
@@ -22,17 +157,22 @@ final class SetupCoordinator {
 
     private let modelManager: any ParakeetModelManaging
     private let microphone: any MicrophonePermissionProviding
+    private let accessibility: any AccessibilityPermissionProviding
     private let defaults: UserDefaults
     private let featureEnabled: Bool
+    private var inFlightEffect: SetupEffect?
+    private var effectTask: Task<Void, Never>?
 
     init(
         modelManager: any ParakeetModelManaging,
         microphone: any MicrophonePermissionProviding,
+        accessibility: any AccessibilityPermissionProviding,
         defaults: UserDefaults = .standard,
         featureEnabled: Bool
     ) {
         self.modelManager = modelManager
         self.microphone = microphone
+        self.accessibility = accessibility
         self.defaults = defaults
         self.featureEnabled = featureEnabled
         reconcileInitialStep()
@@ -42,26 +182,21 @@ final class SetupCoordinator {
 
     var preparationProgress: ModelPreparationProgress { modelManager.progress }
 
-    private var microphoneGranted: Bool {
-        microphone.status == .granted
+    private var facts: SetupFacts {
+        SetupFacts(
+            completedWelcome: defaults.bool(forKey: Self.completedWelcomeKey),
+            dismissedReady: defaults.bool(forKey: Self.dismissedReadyKey),
+            microphone: microphone.status,
+            accessibility: accessibility.trustState,
+            accessibilityPromptOffered: accessibility.hasOfferedPrompt,
+            model: modelManager.state
+        )
     }
 
-    private var modelReadyForDictation: Bool {
-        switch modelManager.state {
-        case .installed, .loaded:
-            return true
-        case .loading:
-            // After setup is done, Parakeet may load into memory without blocking the menu.
-            return defaults.bool(forKey: Self.dismissedReadyKey)
-        case .checking, .notInstalled, .downloading, .failed:
-            return false
-        }
-    }
-
-    /// Dictation requires an installed model and granted microphone permission.
+    /// Dictation requires an installed model, microphone, and Accessibility trust.
     var allowsDictation: Bool {
         guard featureEnabled else { return true }
-        return modelReadyForDictation && microphoneGranted
+        return SetupPolicy.allowsDictation(facts)
     }
 
     /// True while setup must complete before the normal dictation UI is shown.
@@ -71,44 +206,13 @@ final class SetupCoordinator {
 
     var shouldAutoPresent: Bool {
         guard featureEnabled else { return false }
-        if defaults.bool(forKey: Self.dismissedReadyKey),
-           modelManager.state.isInstalled,
-           microphoneGranted
-        {
-            return false
-        }
-        return true
+        return SetupPolicy.shouldAutoPresent(facts)
     }
 
     /// Menu label when setup chrome should appear; nil hides the control.
     var menuActionTitle: String? {
         guard featureEnabled else { return nil }
-        // Touch observable model state so SwiftUI refreshes during install.
-        let state = modelManager.state
-
-        switch state {
-        case .downloading, .loading:
-            if defaults.bool(forKey: Self.dismissedReadyKey), state == .loading {
-                // In-memory load after setup: only show chrome if mic is missing.
-                if !microphoneGranted {
-                    return "Finish Setup…"
-                }
-                return nil
-            }
-            return "Getting Ready…"
-        case .failed:
-            return "Setup Failed — Try Again…"
-        case .installed, .loaded:
-            if !microphoneGranted {
-                return "Finish Setup…"
-            }
-            if defaults.bool(forKey: Self.dismissedReadyKey) {
-                return nil
-            }
-            return "Finish Setup…"
-        case .notInstalled, .checking:
-            return "Finish Setup…"
-        }
+        return SetupPolicy.menuChrome(for: facts).actionTitle
     }
 
     var showsMenuSetupChrome: Bool {
@@ -117,33 +221,7 @@ final class SetupCoordinator {
 
     var menuStatusText: String? {
         guard featureEnabled else { return nil }
-        let state = modelManager.state
-
-        if !microphoneGranted, state.isInstalled || state == .loading {
-            if microphone.status == .denied {
-                return "Microphone access required"
-            }
-            return "Microphone permission needed"
-        }
-
-        switch state {
-        case .downloading, .loading:
-            if defaults.bool(forKey: Self.dismissedReadyKey), state == .loading, microphoneGranted {
-                return nil
-            }
-            return "Getting ready…"
-        case .failed:
-            return "Setup failed"
-        case .installed, .loaded:
-            if defaults.bool(forKey: Self.dismissedReadyKey), microphoneGranted {
-                return nil
-            }
-            return "Ready"
-        case .notInstalled:
-            return "Setup required"
-        case .checking:
-            return nil
-        }
+        return SetupPolicy.menuChrome(for: facts).statusText
     }
 
     func markWindowVisible(_ visible: Bool) {
@@ -153,7 +231,7 @@ final class SetupCoordinator {
         }
     }
 
-    /// Refresh model + microphone facts when the app (or setup window) becomes active.
+    /// Refresh model + permission facts when the app (or setup window) becomes active.
     func applicationDidBecomeActive() {
         windowDidBecomeActive()
     }
@@ -161,42 +239,41 @@ final class SetupCoordinator {
     func windowDidBecomeActive() {
         guard featureEnabled else { return }
         modelManager.refreshAvailability()
-        reconcileAfterExternalChange()
+        reconcile(intent: .refresh)
     }
 
     func continueFromWelcome() {
-        defaults.set(true, forKey: Self.completedWelcomeKey)
-        step = .microphone
-        Task { await requestMicrophoneAndContinue() }
+        reconcile(intent: .continueWelcome)
     }
 
     func openMicrophoneSettings() {
         microphone.openSystemSettings()
     }
 
+    func openAccessibilitySettings() {
+        accessibility.openSystemSettings()
+    }
+
+    func requestTextInsertionAccess() {
+        reconcile(intent: .requestAccessibility)
+    }
+
     func retryAfterFailure() {
-        step = .preparing
-        Task { await runInstall() }
+        reconcile(intent: .retryInstall)
     }
 
     func retryMicrophone() {
-        Task { await requestMicrophoneAndContinue() }
-    }
-
-    func completeReady() {
-        defaults.set(true, forKey: Self.dismissedReadyKey)
-        defaults.set(true, forKey: Self.completedWelcomeKey)
-        step = .ready
+        reconcile(intent: .requestMicrophone)
     }
 
     /// Call when the user chooses Done on the Ready screen.
     func acknowledgeReadyAndDismiss() {
-        completeReady()
+        reconcile(intent: .acknowledgeReady)
     }
 
     func presentRequestedFromMenu() {
         modelManager.refreshAvailability()
-        reconcilePresentingStep()
+        reconcile(intent: .refresh)
     }
 
     // MARK: - Private
@@ -208,138 +285,85 @@ final class SetupCoordinator {
         }
 
         modelManager.refreshAvailability()
-        reconcilePresentingStep()
+        reconcile(intent: .refresh)
     }
 
-    private func reconcileAfterExternalChange() {
-        // Mic re-granted while waiting on denied screen → continue install if needed.
-        if step == .microphoneDenied, microphoneGranted {
-            if modelManager.state.isInstalled {
-                step = .ready
-            } else {
-                beginPreparationAfterMicrophoneGranted()
+    private func reconcile(intent: SetupIntent) {
+        let requestedEffect: SetupEffect?
+        switch intent {
+        case .refresh:
+            requestedEffect = nil
+        case .continueWelcome:
+            defaults.set(true, forKey: Self.completedWelcomeKey)
+            requestedEffect = microphone.status == .undetermined
+                ? .requestMicrophone
+                : nil
+        case .requestMicrophone:
+            requestedEffect = .requestMicrophone
+        case .requestAccessibility:
+            requestedEffect = .requestAccessibility
+        case .retryInstall:
+            requestedEffect = .installModel
+        case .acknowledgeReady:
+            defaults.set(true, forKey: Self.dismissedReadyKey)
+            defaults.set(true, forKey: Self.completedWelcomeKey)
+            requestedEffect = nil
+        }
+
+        clearStaleReadyPreferenceIfNeeded()
+        let decision = SetupPolicy.decision(for: facts)
+        step = intent == .retryInstall ? .preparing : decision.step
+
+        let effect = requestedEffect ?? decision.effect
+        if effect != .none {
+            start(effect)
+        }
+    }
+
+    private func clearStaleReadyPreferenceIfNeeded() {
+        guard defaults.bool(forKey: Self.dismissedReadyKey),
+              !modelManager.state.isInstalled,
+              !modelManager.state.isInstalling
+        else {
+            return
+        }
+        defaults.set(false, forKey: Self.dismissedReadyKey)
+    }
+
+    private func start(_ effect: SetupEffect) {
+        guard inFlightEffect == nil else { return }
+        inFlightEffect = effect
+        effectTask = Task { [weak self] in
+            guard let self else { return }
+            await self.perform(effect)
+            self.finish(effect)
+        }
+    }
+
+    private func perform(_ effect: SetupEffect) async {
+        switch effect {
+        case .none:
+            break
+        case .requestMicrophone:
+            _ = await microphone.requestAccessIfNeeded()
+        case .requestAccessibility:
+            _ = await accessibility.requestAccessIfNeeded()
+        case .installModel:
+            let currentFacts = facts
+            guard currentFacts.microphone == .granted,
+                  currentFacts.accessibility == .trusted,
+                  !modelManager.state.isInstalled
+            else {
+                return
             }
-            return
-        }
-
-        // Mic revoked after ready → route back to recovery.
-        if modelManager.state.isInstalled, !microphoneGranted {
-            step = microphone.status == .denied ? .microphoneDenied : .microphone
-            return
-        }
-
-        // Model missing after previously being ready.
-        if !modelManager.state.isInstalled, case .failed = modelManager.state {
-            step = .failed
-            return
-        }
-
-        if !modelManager.state.isInstalled,
-           !modelManager.state.isInstalling,
-           defaults.bool(forKey: Self.dismissedReadyKey) || step == .ready
-        {
-            // Stale completion prefs: required files are gone.
-            defaults.set(false, forKey: Self.dismissedReadyKey)
-            if microphoneGranted {
-                beginPreparationAfterMicrophoneGranted()
-            } else if microphone.status == .denied {
-                step = .microphoneDenied
-            } else {
-                step = defaults.bool(forKey: Self.completedWelcomeKey) ? .microphone : .welcome
-            }
-            return
-        }
-
-        reconcileIfModelAlreadyReady()
-    }
-
-    private func reconcilePresentingStep() {
-        switch modelManager.state {
-        case .failed:
-            step = .failed
-        case .downloading, .loading:
-            step = .preparing
-        case .installed, .loaded:
-            if !microphoneGranted {
-                switch microphone.status {
-                case .denied:
-                    step = .microphoneDenied
-                case .undetermined:
-                    step = .microphone
-                    if defaults.bool(forKey: Self.completedWelcomeKey) {
-                        Task { await requestMicrophoneAndContinue() }
-                    }
-                case .granted:
-                    step = .ready
-                }
-            } else {
-                if !defaults.bool(forKey: Self.dismissedReadyKey) {
-                    defaults.set(true, forKey: Self.completedWelcomeKey)
-                }
-                step = .ready
-            }
-        case .notInstalled, .checking:
-            // Stale completion prefs must not pretend the model is ready.
-            if defaults.bool(forKey: Self.dismissedReadyKey) {
-                defaults.set(false, forKey: Self.dismissedReadyKey)
-            }
-            if defaults.bool(forKey: Self.completedWelcomeKey) {
-                switch microphone.status {
-                case .granted:
-                    beginPreparationAfterMicrophoneGranted()
-                case .denied:
-                    step = .microphoneDenied
-                case .undetermined:
-                    step = .microphone
-                    Task { await requestMicrophoneAndContinue() }
-                }
-            } else {
-                step = .welcome
-            }
+            try? await modelManager.ensureInstalled()
         }
     }
 
-    private func reconcileIfModelAlreadyReady() {
-        if modelManager.state.isInstalled, microphoneGranted,
-           step == .preparing || step == .failed
-        {
-            step = .ready
-        }
-    }
-
-    private func requestMicrophoneAndContinue() async {
-        let status = await microphone.requestAccessIfNeeded()
-        switch status {
-        case .granted:
-            beginPreparationAfterMicrophoneGranted()
-        case .denied:
-            step = .microphoneDenied
-        case .undetermined:
-            step = .microphone
-        }
-    }
-
-    private func beginPreparationAfterMicrophoneGranted() {
-        if modelManager.state.isInstalled {
-            step = .ready
-            return
-        }
-        step = .preparing
-        Task { await runInstall() }
-    }
-
-    private func runInstall() async {
-        if modelManager.state.isInstalled {
-            step = .ready
-            return
-        }
-
-        step = .preparing
-        do {
-            try await modelManager.ensureInstalled()
-            step = .ready
-        } catch {
-            step = .failed
-        }
+    private func finish(_ effect: SetupEffect) {
+        guard inFlightEffect == effect else { return }
+        inFlightEffect = nil
+        effectTask = nil
+        reconcile(intent: .refresh)
     }
 }

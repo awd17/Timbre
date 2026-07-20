@@ -37,7 +37,7 @@ final class DictationShortcutActionTests: XCTestCase {
     func testCompletedAndFailedStartFreshSession() {
         XCTAssertEqual(
             DictationShortcutPolicy.resolve(
-                session: .completed(transcript: "done"),
+                session: .completed(transcript: "done", outcome: .inserted),
                 setup: .unrestricted
             ),
             .start

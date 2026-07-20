@@ -132,3 +132,37 @@ final class FakeMicrophonePermission: MicrophonePermissionProviding {
         openSettingsCallCount += 1
     }
 }
+
+@MainActor
+final class FakeAccessibilityPermission: AccessibilityPermissionProviding {
+    var trustState: AccessibilityTrustState
+    private(set) var hasOfferedPrompt: Bool
+    private(set) var requestCallCount = 0
+    private(set) var openSettingsCallCount = 0
+    /// When set, `requestAccessIfNeeded` updates `trustState` to this value.
+    var trustAfterRequest: AccessibilityTrustState?
+
+    init(
+        trustState: AccessibilityTrustState = .trusted,
+        hasOfferedPrompt: Bool = false
+    ) {
+        self.trustState = trustState
+        self.hasOfferedPrompt = hasOfferedPrompt
+    }
+
+    func requestAccessIfNeeded() async -> AccessibilityTrustState {
+        requestCallCount += 1
+        if trustState == .trusted {
+            return .trusted
+        }
+        hasOfferedPrompt = true
+        if let trustAfterRequest {
+            trustState = trustAfterRequest
+        }
+        return trustState
+    }
+
+    func openSystemSettings() {
+        openSettingsCallCount += 1
+    }
+}

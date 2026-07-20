@@ -81,6 +81,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: false
         )
@@ -95,6 +96,7 @@ final class SetupCoordinatorTests: XCTestCase {
         _ = SetupCoordinator(
             modelManager: model,
             microphone: FakeMicrophonePermission(),
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -110,6 +112,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -132,6 +135,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -143,12 +147,13 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
-    func testDeniedDoesNotReRequestPrompt() async {
+    func testDeniedWaitsForExplicitRetry() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission(status: .denied)
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -156,12 +161,12 @@ final class SetupCoordinatorTests: XCTestCase {
         coordinator.continueFromWelcome()
         await waitUntil { coordinator.step == .microphoneDenied }
 
-        XCTAssertEqual(mic.requestCallCount, 1)
+        XCTAssertEqual(mic.requestCallCount, 0)
         XCTAssertEqual(coordinator.step, .microphoneDenied)
 
         coordinator.retryMicrophone()
-        await waitUntil { mic.requestCallCount == 2 }
-        XCTAssertEqual(mic.requestCallCount, 2)
+        await waitUntil { mic.requestCallCount == 1 }
+        XCTAssertEqual(mic.requestCallCount, 1)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
@@ -172,6 +177,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -193,22 +199,23 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
 
         coordinator.continueFromWelcome()
         await model.waitForInstallStart()
-        // A second request while preparing should join the fake's in-flight operation.
+        // A second request while preparing must not start another coordinator effect.
         coordinator.retryAfterFailure()
-        await waitUntil { model.ensureInstalledCallCount == 2 }
 
+        XCTAssertEqual(model.ensureInstalledCallCount, 1)
         XCTAssertEqual(model.installOperationCount, 1)
         model.resumeInstallation()
         await waitUntil { coordinator.step == .ready }
 
         XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertEqual(model.ensureInstalledCallCount, 2)
+        XCTAssertEqual(model.ensureInstalledCallCount, 1)
     }
 
     func testRetryAfterFailure() async {
@@ -224,6 +231,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -244,6 +252,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -259,6 +268,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -272,6 +282,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: FakeMicrophonePermission(status: .granted),
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -295,6 +306,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -314,6 +326,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -323,18 +336,167 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.allowsDictation)
     }
 
-    func testInstalledAllowsDictationOnlyWhenMicrophoneGranted() {
+    func testInstalledAllowsDictationOnlyWhenMicrophoneAndAccessibilityGranted() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         let model = FakeParakeetModelManager(initialState: .installed)
         let mic = FakeMicrophonePermission(status: .granted)
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
         XCTAssertTrue(coordinator.allowsDictation)
         XCTAssertFalse(coordinator.blocksDictationUI)
+    }
+
+    func testInstalledBlocksDictationWhenAccessibilityNotTrusted() {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let mic = FakeMicrophonePermission(status: .granted)
+        let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertTrue(coordinator.blocksDictationUI)
+        XCTAssertEqual(coordinator.step, .textInsertion)
+        XCTAssertEqual(coordinator.menuActionTitle, "Finish Setup…")
+        XCTAssertEqual(coordinator.menuStatusText, "Text insertion permission needed")
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testAccessibilityBeforeDownloadWhenMicGranted() async {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        let mic = FakeMicrophonePermission(status: .undetermined)
+        mic.statusAfterRequest = .granted
+        let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        coordinator.continueFromWelcome()
+        await waitUntil { coordinator.step == .textInsertion }
+        XCTAssertEqual(coordinator.step, .textInsertion)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+
+        accessibility.trustAfterRequest = .trusted
+        coordinator.requestTextInsertionAccess()
+        await model.waitForInstallStart()
+        XCTAssertEqual(coordinator.step, .preparing)
+        XCTAssertEqual(model.ensureInstalledCallCount, 1)
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
+    }
+
+    func testAccessibilityDeniedDoesNotStartDownload() async {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        let mic = FakeMicrophonePermission(status: .granted)
+        let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
+        accessibility.trustAfterRequest = .notTrusted
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+
+        coordinator.continueFromWelcome()
+        await waitUntil { coordinator.step == .textInsertion || coordinator.step == .textInsertionDenied }
+        coordinator.requestTextInsertionAccess()
+        await waitUntil { coordinator.step == .textInsertionDenied }
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        XCTAssertTrue(accessibility.hasOfferedPrompt)
+    }
+
+    func testExistingInstalledModelRoutesToTextInsertionWithoutRedownload() {
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let mic = FakeMicrophonePermission(status: .granted)
+        let accessibility = FakeAccessibilityPermission(
+            trustState: .notTrusted,
+            hasOfferedPrompt: true
+        )
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testAccessibilityGrantRestoresReadyWithoutRedownload() {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let mic = FakeMicrophonePermission(status: .granted)
+        let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+        XCTAssertFalse(coordinator.allowsDictation)
+
+        accessibility.trustState = .trusted
+        coordinator.applicationDidBecomeActive()
+        XCTAssertTrue(coordinator.allowsDictation)
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testAccessibilityRevokeUpdatesReadinessWithoutClearingInstall() {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let mic = FakeMicrophonePermission(status: .granted)
+        let accessibility = FakeAccessibilityPermission(trustState: .trusted)
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: mic,
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+        XCTAssertTrue(coordinator.allowsDictation)
+
+        accessibility.trustState = .notTrusted
+        coordinator.applicationDidBecomeActive()
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertEqual(coordinator.step, .textInsertion)
+        XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testOfferedPromptDoesNotProveReadiness() {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let accessibility = FakeAccessibilityPermission(
+            trustState: .notTrusted,
+            hasOfferedPrompt: true
+        )
+        let coordinator = SetupCoordinator(
+            modelManager: model,
+            microphone: FakeMicrophonePermission(status: .granted),
+            accessibility: accessibility,
+            defaults: defaults,
+            featureEnabled: true
+        )
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
     }
 
     func testInstalledBlocksDictationWhenMicrophoneDenied() {
@@ -344,6 +506,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -361,6 +524,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -385,6 +549,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -399,6 +564,7 @@ final class SetupCoordinatorTests: XCTestCase {
         _ = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -417,6 +583,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )
@@ -437,6 +604,7 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             featureEnabled: true
         )

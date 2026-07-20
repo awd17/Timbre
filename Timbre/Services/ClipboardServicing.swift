@@ -2,5 +2,6 @@ import Foundation
 
 protocol ClipboardServicing {
     @MainActor
-    func copy(_ string: String)
+    @discardableResult
+    func copy(_ string: String) -> Bool
 }

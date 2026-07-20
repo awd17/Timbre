@@ -39,10 +39,14 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         let arguments = ProcessInfo.processInfo.arguments
         let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments)
 
+        let targetProvider = FrontmostApplicationTracker()
+        let accessibility = AccessibilityPermissionService()
+
         if setupEnabled {
             setupCoordinator = SetupCoordinator(
                 modelManager: modelManager,
                 microphone: MicrophonePermissionService(),
+                accessibility: accessibility,
                 featureEnabled: true
             )
         } else {
@@ -50,7 +54,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         controller = AssistantController(
-            transcription: Self.makeTranscriptionService(modelManager: modelManager)
+            transcription: Self.makeTranscriptionService(modelManager: modelManager),
+            delivery: Self.makeTranscriptDelivery(
+                arguments: arguments,
+                targetProvider: targetProvider,
+                accessibility: accessibility
+            ),
+            targetProvider: targetProvider
         )
 
         shortcutCoordinator = DictationShortcutCoordinator(
@@ -131,6 +141,27 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         setupWindowController?.present()
+    }
+
+    /// DEBUG mock/fixture/UI paths use clipboard-only delivery so automation never pastes.
+    private static func makeTranscriptDelivery(
+        arguments: [String],
+        targetProvider: any DictationTargetProviding,
+        accessibility: any AccessibilityPermissionProviding
+    ) -> any TranscriptDeliveryServicing {
+#if DEBUG
+        let isDebug = true
+#else
+        let isDebug = false
+#endif
+        let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments, isDebug: isDebug)
+        if !setupEnabled {
+            return ClipboardOnlyTranscriptDelivery()
+        }
+        return FocusedApplicationTextOutputService(
+            accessibility: accessibility,
+            targetProvider: targetProvider
+        )
     }
 
     /// Constructs the transcription backend without requesting microphone permission,

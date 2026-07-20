@@ -1,11 +1,18 @@
 import Foundation
 
+enum TranscriptCompletionOutcome: Equatable {
+    case inserted
+    case copiedByDesign
+    case copiedAfterInsertFailure
+    case deliveryFailed
+}
+
 enum SessionState: Equatable {
     case idle
     case preparing
     case listening(transcript: String)
     case finishing(transcript: String)
-    case completed(transcript: String)
+    case completed(transcript: String, outcome: TranscriptCompletionOutcome)
     case failed(message: String, transcript: String)
 
     var displayedTranscript: String {
@@ -14,7 +21,7 @@ enum SessionState: Equatable {
             return ""
         case .listening(let transcript),
              .finishing(let transcript),
-             .completed(let transcript),
+             .completed(let transcript, _),
              .failed(_, let transcript):
             return transcript
         }
@@ -30,8 +37,17 @@ enum SessionState: Equatable {
             return "Listening..."
         case .finishing:
             return "Processing..."
-        case .completed:
-            return "Copied to clipboard."
+        case .completed(_, let outcome):
+            switch outcome {
+            case .inserted:
+                return "Inserted."
+            case .copiedByDesign:
+                return "Copied to clipboard."
+            case .copiedAfterInsertFailure:
+                return "Couldn't insert text. Copied instead."
+            case .deliveryFailed:
+                return "Couldn't copy or insert text."
+            }
         case .failed(let message, _):
             return message
         }

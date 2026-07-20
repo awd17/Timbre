@@ -28,7 +28,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
             behavior: .success(final: "hello", partials: ["hello"]),
             partialDelayNanoseconds: 1_000_000
         )
-        let controller = AssistantController(transcription: mock, clipboard: FakeClipboard())
+        let controller = makeController(transcription: mock)
         let coordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: nil,
@@ -55,7 +55,13 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
             partialDelayNanoseconds: 0
         )
         let clipboard = FakeClipboard()
-        let controller = AssistantController(transcription: mock, clipboard: clipboard)
+        let delivery = FakeTranscriptDelivery(clipboard: clipboard, result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: mock,
+            clipboard: clipboard,
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
         let coordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: nil,
@@ -73,7 +79,10 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
             return false
         }
 
-        XCTAssertEqual(controller.sessionState, .completed(transcript: "hello"))
+        XCTAssertEqual(
+            controller.sessionState,
+            .completed(transcript: "hello", outcome: .inserted)
+        )
         XCTAssertEqual(clipboard.lastCopied, "hello")
     }
 
@@ -83,7 +92,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
             behavior: .success(final: "one", partials: []),
             partialDelayNanoseconds: 50_000_000
         )
-        let controller = AssistantController(transcription: mock, clipboard: FakeClipboard())
+        let controller = makeController(transcription: mock)
         let coordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: nil,
@@ -112,6 +121,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         let setup = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: UserDefaults(suiteName: UUID().uuidString)!,
             featureEnabled: true
         )
@@ -138,6 +148,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         let setup = SetupCoordinator(
             modelManager: model,
             microphone: mic,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: UserDefaults(suiteName: UUID().uuidString)!,
             featureEnabled: true
         )
@@ -170,13 +181,17 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.menuHintText())
     }
 
-    private func makeController() -> AssistantController {
+    private func makeController(
+        transcription: TranscriptionServicing? = nil
+    ) -> AssistantController {
         AssistantController(
-            transcription: MockTranscriptionService(
+            transcription: transcription ?? MockTranscriptionService(
                 behavior: .success(final: "x", partials: []),
                 partialDelayNanoseconds: 0
             ),
-            clipboard: FakeClipboard()
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
         )
     }
 
