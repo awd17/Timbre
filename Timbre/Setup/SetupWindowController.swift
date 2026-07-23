@@ -7,10 +7,17 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
     private let coordinator: SetupCoordinator
     private var window: NSWindow?
     private let shouldRestoreAccessory: () -> Bool
+    /// When true, shortcut step uses KeyboardShortcuts.Recorder; otherwise a simulated control.
+    private let usesRealShortcutRecorder: Bool
 
-    init(coordinator: SetupCoordinator, shouldRestoreAccessory: @escaping () -> Bool) {
+    init(
+        coordinator: SetupCoordinator,
+        shouldRestoreAccessory: @escaping () -> Bool,
+        usesRealShortcutRecorder: Bool = true
+    ) {
         self.coordinator = coordinator
         self.shouldRestoreAccessory = shouldRestoreAccessory
+        self.usesRealShortcutRecorder = usesRealShortcutRecorder
         super.init()
     }
 
@@ -31,21 +38,53 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
 
         let setupWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 460),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        setupWindow.title = "Set Up Timbre"
+        setupWindow.title = "Timbre"
+        setupWindow.titleVisibility = .hidden
+        setupWindow.titlebarAppearsTransparent = true
+        setupWindow.titlebarSeparatorStyle = .none
+        setupWindow.isMovableByWindowBackground = true
         setupWindow.isReleasedWhenClosed = false
+        // Prevent the default light window chrome from showing as a bottom strip
+        // when full-size SwiftUI content does not perfectly cover the content view.
+        setupWindow.backgroundColor = .black
+        setupWindow.isOpaque = true
+        setupWindow.hasShadow = true
         setupWindow.delegate = self
-        setupWindow.contentView = NSHostingView(
-            rootView: SetupFlowView(coordinator: coordinator) { [weak self] in
-                self?.dismissAfterReady()
-            }
-            .frame(minWidth: 380, minHeight: 260)
+        let hostingView = NSHostingView(
+            rootView: SetupFlowView(
+                coordinator: coordinator,
+                usesRealShortcutRecorder: usesRealShortcutRecorder,
+                onContinueInBackground: { [weak self] in
+                    self?.window?.close()
+                },
+                onDone: { [weak self] in
+                    self?.dismissAfterReady()
+                }
+            )
+            .frame(width: 600, height: 460)
         )
+        // Keep the window's authored size; the flow view stretches to fill it,
+        // including under the transparent title bar.
+        hostingView.sizingOptions = []
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.black.cgColor
+        setupWindow.contentView = hostingView
+        // Ensure the hosting view fills the entire content view (no 1pt gray gaps).
+        hostingView.translatesAutoresizingMaskIntoConstraints = true
+        hostingView.autoresizingMask = [.width, .height]
         setupWindow.center()
+        #if DEBUG
+        if let contentView = setupWindow.contentView {
+            TimbreLog.line(
+                "debug window frame=\(setupWindow.frame) contentView=\(contentView.frame) layoutRect=\(setupWindow.contentLayoutRect)"
+            )
+        }
+        #endif
         setupWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = setupWindow

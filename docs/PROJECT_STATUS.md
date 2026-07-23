@@ -40,16 +40,16 @@ The UI and the controller do not depend on a specific speech engine.
 - Parakeet / FluidAudio model download, load, and file-transcription smoke CLI
 - Fixture-through-app gate via `--parakeet-fixture` (service → controller → clipboard)
 - **Shared `ParakeetModelManager`** with installed vs loaded states (`ensureInstalled` / `ensureLoaded`)
-- **First-run setup in Debug and Release** (welcome → mic → text insertion → download/verify → ready)
-- Dictation readiness requires installed model, granted microphone, **and** Accessibility trust
-- **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; toggle Start/Stop)
+- **First-run setup in Debug and Release** (welcome → shortcut → mic → text insertion → download/verify → ready)
+- Dictation readiness requires installed model, granted microphone, Accessibility trust, **and** a confirmed assigned shortcut
+- **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; onboarding Recorder; toggle Start/Stop)
 - **Model prewarming** after setup readiness (`loadInstalledAndRetain`; never downloads; Start joins single-flight load)
+- **Onboarding visual polish** (branded setup window + background asset; DEBUG `--simulate-onboarding`)
 
 ### Not started / out of this milestone
 
 - Live Parakeet partial transcription / streaming / VAD / auto-stop
 - Full Settings screen / user model controls
-- Shortcut customization UI (`KeyboardShortcuts.Recorder` — required before public release)
 - Floating panel
 - Read or replace selected text
 - Text rewrite and LLM features
@@ -57,7 +57,7 @@ The UI and the controller do not depend on a specific speech engine.
 - Accounts and billing
 - DMG packaging, Developer ID signing, and notarization
 - macOS “Timbre is ready” notifications
-- Onboarding / menu-bar visual polish
+- Menu-bar visual polish (aligned with onboarding)
 
 ## Architecture
 
@@ -129,11 +129,15 @@ Timbre/
     DictationShortcutCoordinator.swift
   Setup/
     TimbreSetupFeature.swift
+    OnboardingPreferencesProviding.swift
     SetupCoordinator.swift
     SetupWindowController.swift
     SetupFlowView.swift
+    SimulatedOnboarding.swift          DEBUG simulation flags
+    SimulatedOnboardingDependencies.swift  DEBUG fakes
   Fixtures/parakeet-smoke-test.wav
   Views/MenuBarDictationView.swift
+  Assets.xcassets/OnboardingBackground.imageset/
 Tools/ParakeetSmokeTest/
   Sources/                        Developer CLI
   Fixtures/                       WAV file and script notes
@@ -141,6 +145,7 @@ scripts/run-parakeet-smoke.sh
 docs/PARAKEET_SMOKE_TEST.md
 docs/PARAKEET_MICROPHONE_DICTATION.md
 docs/SETUP_AND_MODEL_MANAGEMENT.md
+docs/ONBOARDING_UX.md
 docs/GLOBAL_DICTATION_SHORTCUT.md
 docs/FOCUSED_APP_TEXT_INSERTION.md
 TimbreTests/
@@ -152,7 +157,7 @@ TimbreUITests/
 - Do not couple SwiftUI views to Speech or AVFoundation.
 - New speech backends must implement `TranscriptionServicing` when they join the interactive app path.
 - Prefer changes to `SessionState` over new controller flags.
-- Keep mock transcription, Apple Speech override, fixture gate, debug window, and setup-bypass flags inside DEBUG-only paths.
+- Keep mock transcription, Apple Speech override, fixture gate, debug window, setup-bypass, and simulated-onboarding flags inside DEBUG-only paths.
 - Parakeet is the production default in Debug and Release; do not silently fall back to Apple Speech.
 - Automatic setup is on in Release; DEBUG may bypass it for mock / fixture / `--apple-speech` / `--disable-setup`.
 - Distinguish installed (on disk) from loaded (`AsrManager` retained).
@@ -167,13 +172,12 @@ TimbreUITests/
 Do not start these items unless a task asks for them:
 
 - Live Parakeet partials / streaming ASR
-- Shortcut Recorder / onboarding shortcut picker
 - Direct AX text replacement / selection rewrite
 - Full Settings screens
 - Authentication
 - Billing
 - Packaging and notarization
-- Onboarding / menu visual polish
+- Menu-bar visual polish
 
 ## History from the blank template
 
@@ -190,6 +194,7 @@ Do not start these items unless a task asks for them:
 11. The project added a global dictation toggle shortcut (temporary ⌃⇧D).
 12. The project added focused-app text insertion (Accessibility + clipboard Command-V).
 13. The project added model prewarming after setup readiness to reduce first-Start latency.
+14. The project polished first-run onboarding (shortcut step, branded window, simulated onboarding).
 
 ## Related docs
 
@@ -197,6 +202,7 @@ Do not start these items unless a task asks for them:
 - Parakeet smoke test: `docs/PARAKEET_SMOKE_TEST.md`
 - Parakeet app mic path: `docs/PARAKEET_MICROPHONE_DICTATION.md`
 - Setup / model management: `docs/SETUP_AND_MODEL_MANAGEMENT.md`
+- Onboarding UX: `docs/ONBOARDING_UX.md`
 - Model prewarming: `docs/MODEL_PREWARMING.md`
 - Global shortcut: `docs/GLOBAL_DICTATION_SHORTCUT.md`
 - Focused-app insertion: `docs/FOCUSED_APP_TEXT_INSERTION.md`

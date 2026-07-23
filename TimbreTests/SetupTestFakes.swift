@@ -220,6 +220,61 @@ final class FakeMicrophonePermission: MicrophonePermissionProviding {
 }
 
 @MainActor
+@Observable
+final class FakeShortcutOnboarding: ShortcutOnboardingProviding {
+    private(set) var hasAssignedShortcut: Bool
+    private(set) var displayString: String
+    private(set) var applyCallCount = 0
+    private(set) var refreshCallCount = 0
+
+    init(
+        hasAssignedShortcut: Bool = true,
+        displayString: String = DictationShortcutName.temporaryDefaultDisplayString
+    ) {
+        self.hasAssignedShortcut = hasAssignedShortcut
+        self.displayString = displayString
+    }
+
+    func applyRecorderChange(isAssigned: Bool, displayString: String?) {
+        applyCallCount += 1
+        hasAssignedShortcut = isAssigned
+        if let displayString, !displayString.isEmpty {
+            self.displayString = displayString
+        } else if !isAssigned {
+            self.displayString = DictationShortcutName.temporaryDefaultDisplayString
+        }
+    }
+
+    func refreshFromStorage() {
+        refreshCallCount += 1
+    }
+
+    func setAssigned(_ assigned: Bool, displayString: String? = nil) {
+        hasAssignedShortcut = assigned
+        if let displayString {
+            self.displayString = displayString
+        }
+    }
+}
+
+@MainActor
+final class FakeOnboardingPreferences: OnboardingPreferencesProviding {
+    var completedWelcome: Bool
+    var dismissedReady: Bool
+    var completedShortcutOnboarding: Bool
+
+    init(
+        completedWelcome: Bool = false,
+        dismissedReady: Bool = false,
+        completedShortcutOnboarding: Bool = false
+    ) {
+        self.completedWelcome = completedWelcome
+        self.dismissedReady = dismissedReady
+        self.completedShortcutOnboarding = completedShortcutOnboarding
+    }
+}
+
+@MainActor
 final class FakeAccessibilityPermission: AccessibilityPermissionProviding {
     var trustState: AccessibilityTrustState
     private(set) var hasOfferedPrompt: Bool
