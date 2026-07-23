@@ -6,6 +6,7 @@ struct SetupFlowView: View {
     var usesRealShortcutRecorder: Bool = true
     var onContinueInBackground: (() -> Void)?
     var onDone: () -> Void
+    @State private var isRecordingShortcut = false
 
     var body: some View {
         ZStack {
@@ -161,27 +162,65 @@ struct SetupFlowView: View {
             subtitle: "Use this shortcut to start and stop dictation from anywhere.",
             hero: { symbolHero("command") },
             content: {
-                VStack(spacing: 14) {
-                    Group {
-                        if usesRealShortcutRecorder {
-                            KeyboardShortcuts.Recorder(for: .toggleDictation) { newShortcut in
-                                coordinator.shortcutRecorderDidChange(
-                                    isAssigned: newShortcut != nil,
-                                    displayString: newShortcut?.description
-                                )
-                            }
-                            .accessibilityIdentifier("setupShortcutRecorder")
+                VStack(spacing: 16) {
+                    VStack(spacing: 9) {
+                        Text("YOUR HOTKEY")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.4)
+                            .foregroundStyle(.white.opacity(0.48))
+
+                        if coordinator.canContinueFromShortcut {
+                            ShortcutKeyCapsView(displayString: coordinator.shortcutDisplayString)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Current hotkey \(coordinator.shortcutDisplayString)")
+                                .accessibilityIdentifier("setupShortcutKeyCaps")
                         } else {
-                            simulatedShortcutControls
+                            Text("Not set")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.55))
                         }
                     }
+                    .frame(minHeight: 54)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("setupShortcutDisplay")
 
-                    if !coordinator.canContinueFromShortcut {
-                        Text("Record a shortcut to continue.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .accessibilityIdentifier("setupShortcutRequiredHint")
+                    Button {
+                        guard !isRecordingShortcut else { return }
+                        isRecordingShortcut = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: isRecordingShortcut ? "dot.radiowaves.left.and.right" : "keyboard")
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(isRecordingShortcut ? "Listening for shortcut…" : "Set hotkey")
+                        }
+                        .frame(minWidth: 154)
                     }
+                    .buttonStyle(OnboardingSecondaryButtonStyle())
+                    .accessibilityLabel(isRecordingShortcut ? "Listening for shortcut" : "Set hotkey")
+                    .accessibilityIdentifier("setupShortcutSetButton")
+                    .overlay {
+                        ShortcutRecorderCapture(
+                            name: shortcutRecorderName,
+                            isRecording: $isRecordingShortcut
+                        ) { newShortcut in
+                            coordinator.shortcutRecorderDidChange(
+                                isAssigned: newShortcut != nil,
+                                displayString: newShortcut?.description
+                            )
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityHidden(true)
+                    }
+
+                    Text(
+                        isRecordingShortcut
+                            ? "Press the shortcut you want to use."
+                            : "Use ⌃, ⌥, or ⌘ with a letter, number, Space, or function key."
+                    )
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(isRecordingShortcut ? 0.85 : 0.6))
+                    .multilineTextAlignment(.center)
+                    .accessibilityIdentifier("setupShortcutRecordingStatus")
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.top, 22)
@@ -198,30 +237,13 @@ struct SetupFlowView: View {
         )
     }
 
-    private var simulatedShortcutControls: some View {
-        VStack(spacing: 14) {
-            ShortcutKeyCapsView(displayString: coordinator.shortcutDisplayString)
-                .accessibilityElement(children: .ignore)
-                .accessibilityIdentifier("setupSimulatedShortcutValue")
-                .accessibilityLabel(coordinator.shortcutDisplayString)
-
-            HStack(spacing: 10) {
-                Button("Clear") {
-                    coordinator.shortcutRecorderDidChange(isAssigned: false, displayString: nil)
-                }
-                .buttonStyle(OnboardingSecondaryButtonStyle())
-                .accessibilityIdentifier("setupSimulatedShortcutClear")
-
-                Button("Use ⌃⇧D") {
-                    coordinator.shortcutRecorderDidChange(
-                        isAssigned: true,
-                        displayString: DictationShortcutName.temporaryDefaultDisplayString
-                    )
-                }
-                .buttonStyle(OnboardingSecondaryButtonStyle())
-                .accessibilityIdentifier("setupSimulatedShortcutAssign")
-            }
+    private var shortcutRecorderName: KeyboardShortcuts.Name {
+        #if DEBUG
+        if !usesRealShortcutRecorder {
+            return .simulatedOnboarding
         }
+        #endif
+        return .toggleDictation
     }
 
     private var microphone: some View {

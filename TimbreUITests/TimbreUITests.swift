@@ -76,13 +76,18 @@ final class TimbreUITests: XCTestCase {
         XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5))
         XCTAssertTrue(shortcutContinue.isEnabled)
 
-        let clear = app.buttons["setupSimulatedShortcutClear"]
-        XCTAssertTrue(clear.waitForExistence(timeout: 2))
-        clear.click()
-        XCTAssertFalse(shortcutContinue.isEnabled)
+        let setHotkey = app.buttons["setupShortcutSetButton"]
+        XCTAssertTrue(setHotkey.waitForExistence(timeout: 2))
+        setHotkey.click()
 
-        let assign = app.buttons["setupSimulatedShortcutAssign"]
-        assign.click()
+        let recordingStatus = app.descendants(matching: .any)["setupShortcutRecordingStatus"]
+        let listening = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Press the shortcut you want to use."),
+            object: recordingStatus
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [listening], timeout: 5), .completed)
+
+        app.typeKey("k", modifierFlags: [.control, .shift])
         XCTAssertTrue(shortcutContinue.isEnabled)
         shortcutContinue.click()
 
@@ -119,5 +124,59 @@ final class TimbreUITests: XCTestCase {
         )
 
         done.click()
+    }
+
+    @MainActor
+    func testHotkeyButtonRecordsShortcutDuringSimulatedOnboarding() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--simulate-onboarding",
+            "--simulate-onboarding-duration",
+            "2",
+            "--simulate-onboarding-step",
+            "shortcut-empty",
+        ]
+        app.launch()
+        app.activate()
+
+        let hotkeyDisplay = app.descendants(matching: .any)["setupShortcutDisplay"]
+        XCTAssertTrue(
+            hotkeyDisplay.waitForExistence(timeout: 10),
+            "Expected the custom hotkey display. Hierarchy:\n\(app.debugDescription)"
+        )
+
+        let shortcutContinue = app.buttons["setupShortcutContinueButton"]
+        XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5))
+        XCTAssertFalse(shortcutContinue.isEnabled)
+
+        let setHotkey = app.buttons["setupShortcutSetButton"]
+        XCTAssertTrue(setHotkey.waitForExistence(timeout: 5))
+        setHotkey.click()
+
+        let recordingStatus = app.descendants(matching: .any)["setupShortcutRecordingStatus"]
+        let listening = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "value == %@", "Press the shortcut you want to use."),
+            object: recordingStatus
+        )
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [listening], timeout: 5),
+            .completed,
+            "Expected recording guidance after pressing Set hotkey. Current value: \(String(describing: recordingStatus.value))"
+        )
+
+        app.typeKey("k", modifierFlags: [.control, .shift])
+
+        let assignedHotkey = app.descendants(matching: .any)["setupShortcutKeyCaps"]
+        XCTAssertTrue(
+            assignedHotkey.waitForExistence(timeout: 5),
+            "Expected Control-Shift-K above the button. Hierarchy:\n\(app.debugDescription)"
+        )
+        XCTAssertEqual(assignedHotkey.label, "Current hotkey ⌃⇧K")
+        XCTAssertTrue(shortcutContinue.isEnabled)
+
+        let screenshot = XCTAttachment(screenshot: app.windows["Timbre"].screenshot())
+        screenshot.name = "onboarding-custom-hotkey-control"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
     }
 }

@@ -8,13 +8,22 @@ import KeyboardShortcuts
 extension KeyboardShortcuts.Name {
     static let toggleDictation = Self(
         "toggleDictation",
-        default: .init(.d, modifiers: [.control, .shift])
+        default: DictationShortcutName.recommendedShortcut
     )
+
+    #if DEBUG
+    /// Isolated storage used by simulated onboarding so UI tests never change the real shortcut.
+    static let simulatedOnboarding = Self("simulatedOnboarding")
+    #endif
 }
 
 enum DictationShortcutName {
     /// Fallback display when the package has no stored shortcut yet.
     static let temporaryDefaultDisplayString = "⌃⇧D"
+    static let recommendedShortcut = KeyboardShortcuts.Shortcut(
+        .d,
+        modifiers: [.control, .shift]
+    )
 
     @MainActor
     static var displayString: String {

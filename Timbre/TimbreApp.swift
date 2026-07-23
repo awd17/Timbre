@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 
 @main
@@ -66,6 +67,16 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     "Timbre onboarding: SIMULATED mode duration=\(simConfig.durationSeconds)s failOnce=\(simConfig.failOnce) realRecorder=\(simConfig.useRealRecorder)"
                 )
                 let preferences = Self.makeSimulatedPreferences(config: simConfig)
+                if !simConfig.useRealRecorder {
+                    let simulatedShortcut: KeyboardShortcuts.Shortcut? =
+                        simConfig.initialStep == "shortcut-empty"
+                        ? nil
+                        : DictationShortcutName.recommendedShortcut
+                    KeyboardShortcuts.setShortcut(
+                        simulatedShortcut,
+                        for: .simulatedOnboarding
+                    )
+                }
                 let shortcut: any ShortcutOnboardingProviding = simConfig.useRealRecorder
                     ? KeyboardShortcutsOnboardingAdapter()
                     : SimulatedShortcutOnboarding(
@@ -166,6 +177,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Self.applyBundledApplicationIcon()
         #if DEBUG
         if Self.wantsDebugWindow {
             NSApp.setActivationPolicy(.regular)
@@ -174,6 +186,20 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         if setupCoordinator?.shouldAutoPresent == true {
             NSApp.setActivationPolicy(.regular)
         }
+    }
+
+    /// Explicitly applies the asset-catalog icon so Xcode and Launch Services do not
+    /// keep showing the generic executable icon for this menu-bar-first app.
+    private static func applyBundledApplicationIcon() {
+        guard
+            let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+            let icon = NSImage(contentsOf: iconURL)
+        else {
+            TimbreLog.line("Timbre icon: bundled AppIcon.icns is missing")
+            return
+        }
+
+        NSApp.applicationIconImage = icon
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

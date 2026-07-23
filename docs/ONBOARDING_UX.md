@@ -59,11 +59,11 @@ Timbre.app/Contents/MacOS/Timbre \
 
 | Argument | Effect |
 |----------|--------|
-| `--simulate-onboarding` | Forces setup on; fake mic/Accessibility/model; isolated in-memory prefs; disables global hotkey registration, real prewarm, paste insertion, System Settings, FluidAudio |
+| `--simulate-onboarding` | Forces setup on; fake mic/Accessibility/model; isolated prefs and custom hotkey capture; disables global hotkey registration, real prewarm, paste insertion, System Settings, FluidAudio |
 | `--simulate-onboarding-duration <seconds>` | Fake download length (default 6) |
 | `--simulate-onboarding-failure` | First simulated install fails; retry can succeed |
 | `--simulate-onboarding-step <name>` | Jump to a seeded state (`welcome`, `shortcut`, `shortcut-empty`, `microphone`, `microphone-denied`, `accessibility`, `accessibility-denied`, `preparing`, `ready`, `failed`) |
-| `--simulate-onboarding-real-recorder` | Optional interactive use of the real KeyboardShortcuts Recorder (can mutate the developer’s real `.toggleDictation`). Automated UI tests do **not** use this. |
+| `--simulate-onboarding-real-recorder` | Uses the production `.toggleDictation` recorder instead of the isolated simulated recorder (can mutate the developer’s real shortcut). Automated UI tests do **not** use this. |
 
 Incompatible with `--disable-setup`, `--parakeet-fixture`, and `--apple-speech`. Compatible with `--mock-transcription` in the sense that simulation already uses mock transcription internally.
 

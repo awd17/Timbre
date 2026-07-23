@@ -49,17 +49,13 @@ defaults delete com.augustdrakton.Timbre KeyboardShortcuts_toggleDictation
 
 ## Onboarding Recorder
 
-Onboarding embeds:
-
-```swift
-KeyboardShortcuts.Recorder(for: .toggleDictation) { newShortcut in
-    // Updates Continue enablement via ShortcutOnboardingProviding
-}
-```
+Onboarding displays Timbre-styled keycaps above a **Set hotkey** button. A
+visually hidden `KeyboardShortcuts.RecorderCocoa` handles capture, validation,
+and conflict alerts after the button is pressed.
 
 Continue is disabled when the assigned shortcut is nil. Ready and menu hints read the same live display string.
 
-DEBUG `--simulate-onboarding` uses a deterministic simulated shortcut control by default so UI tests do not mutate the developer’s real chord. Optional `--simulate-onboarding-real-recorder` enables the real Recorder for interactive QA only.
+DEBUG `--simulate-onboarding` uses the same recorder capture path with an isolated shortcut name, so UI tests exercise key capture without mutating the developer’s real chord. Optional `--simulate-onboarding-real-recorder` points the recorder at the production shortcut for interactive QA only.
 
 ## Toggle behavior
 
