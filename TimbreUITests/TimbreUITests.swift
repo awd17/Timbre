@@ -93,6 +93,17 @@ final class TimbreUITests: XCTestCase {
         )
         XCTAssertTrue(app.descendants(matching: .any)["setupProgress"].waitForExistence(timeout: 2))
 
+        // Visual check for the bottom gray bar regression.
+        let screenshot = XCUIScreen.main.screenshot()
+        let attachment = XCTAttachment(screenshot: screenshot)
+        attachment.name = "onboarding-preparing-no-bottom-bar"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let out = FileManager.default.temporaryDirectory
+            .appendingPathComponent("timbre-onboarding-preparing-check.png")
+        try screenshot.pngRepresentation.write(to: out)
+        NSLog("Wrote onboarding screenshot to \(out.path)")
+
         // Stay on the window through completion. Close/reopen-without-cancel is covered by
         // SetupCoordinator unit tests; MenuBarExtra reopen is unreliable in UI automation.
         let done = app.buttons["setupDoneButton"]

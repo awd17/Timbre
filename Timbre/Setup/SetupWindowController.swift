@@ -38,7 +38,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
 
         let setupWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 460),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -46,10 +46,16 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         setupWindow.title = "Timbre"
         setupWindow.titleVisibility = .hidden
         setupWindow.titlebarAppearsTransparent = true
+        setupWindow.titlebarSeparatorStyle = .none
         setupWindow.isMovableByWindowBackground = true
         setupWindow.isReleasedWhenClosed = false
+        // Prevent the default light window chrome from showing as a bottom strip
+        // when full-size SwiftUI content does not perfectly cover the content view.
+        setupWindow.backgroundColor = .black
+        setupWindow.isOpaque = true
+        setupWindow.hasShadow = true
         setupWindow.delegate = self
-        setupWindow.contentView = NSHostingView(
+        let hostingView = NSHostingView(
             rootView: SetupFlowView(
                 coordinator: coordinator,
                 usesRealShortcutRecorder: usesRealShortcutRecorder,
@@ -60,9 +66,25 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
                     self?.dismissAfterReady()
                 }
             )
-            .frame(width: 560, height: 440)
+            .frame(width: 600, height: 460)
         )
+        // Keep the window's authored size; the flow view stretches to fill it,
+        // including under the transparent title bar.
+        hostingView.sizingOptions = []
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = NSColor.black.cgColor
+        setupWindow.contentView = hostingView
+        // Ensure the hosting view fills the entire content view (no 1pt gray gaps).
+        hostingView.translatesAutoresizingMaskIntoConstraints = true
+        hostingView.autoresizingMask = [.width, .height]
         setupWindow.center()
+        #if DEBUG
+        if let contentView = setupWindow.contentView {
+            TimbreLog.line(
+                "debug window frame=\(setupWindow.frame) contentView=\(contentView.frame) layoutRect=\(setupWindow.contentLayoutRect)"
+            )
+        }
+        #endif
         setupWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window = setupWindow
