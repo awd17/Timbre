@@ -34,6 +34,11 @@ input. It verifies:
   failure;
 - clean Quit behavior.
 
+Global shortcut start/stop events are sent through XCTest's keyboard API, so
+the runner does not need Accessibility or Input Monitoring authorization.
+Busy-state bursts are armed through the integration probe sidecar and replayed
+immediately after the next real Carbon key-up.
+
 The test stops at the final Command-V posting boundary. It proves Timbre
 validated the original target and issued the insertion request with the exact
 clipboard text; it does not claim macOS accepted a synthetic paste.

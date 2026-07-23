@@ -229,16 +229,22 @@ final class TimbreUITests: XCTestCase {
         let initial = try readProbe(backgroundProbeURL)
 
         textEdit.activate()
-        postGlobalHotkey(repetitions: 4)
+        let armedStart = try armShortcutBurst(after: initial)
+        pressGlobalHotkey(in: textEdit)
         let listening = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.sessionStarts == initial.sessionStarts + 1
+                && $0.shortcutBurstInvocations
+                    == armedStart.shortcutBurstInvocations + 3
         }
         XCTAssertEqual(listening.sessionStarts, initial.sessionStarts + 1)
         XCTAssertEqual(listening.sessionStops, initial.sessionStops)
 
-        postGlobalHotkey(repetitions: 4)
+        let armedStop = try armShortcutBurst(after: listening)
+        pressGlobalHotkey(in: textEdit)
         let inserted = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.successfulPastes == initial.successfulPastes + 1
+                && $0.shortcutBurstInvocations
+                    == armedStop.shortcutBurstInvocations + 3
         }
         XCTAssertEqual(inserted.sessionStarts, initial.sessionStarts + 1)
         XCTAssertEqual(inserted.sessionStops, initial.sessionStops + 1)
@@ -311,11 +317,11 @@ final class TimbreUITests: XCTestCase {
         }
         let textEdit = launchTextEdit()
         textEdit.activate()
-        postGlobalHotkey()
+        pressGlobalHotkey(in: textEdit)
         _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.sessionStarts == relaunched.sessionStarts + 1
         }
-        postGlobalHotkey()
+        pressGlobalHotkey(in: textEdit)
         let readyUse = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.successfulPastes == relaunched.successfulPastes + 1
         }
@@ -372,7 +378,7 @@ final class TimbreUITests: XCTestCase {
         ) { textEdit, _, _ in
             let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
             finder.activate()
-            self.postGlobalHotkey()
+            self.pressGlobalHotkey(in: finder)
         }
 
         try runFallbackScenario(
@@ -382,7 +388,7 @@ final class TimbreUITests: XCTestCase {
             textEdit.terminate()
             XCTAssertTrue(textEdit.wait(for: .notRunning, timeout: 5))
             app.activate()
-            self.postGlobalHotkey()
+            self.pressGlobalHotkey(in: app)
         }
 
         for (scenario, result) in [
@@ -393,7 +399,7 @@ final class TimbreUITests: XCTestCase {
         ] {
             try runFallbackScenario(scenario: scenario, expectedResult: result) {
                 textEdit, _, _ in
-                self.postGlobalHotkey()
+                self.pressGlobalHotkey(in: textEdit)
             }
         }
     }
@@ -419,7 +425,7 @@ final class TimbreUITests: XCTestCase {
         let textEdit = launchTextEdit()
         let before = try readProbe(backgroundProbeURL)
         textEdit.activate()
-        postGlobalHotkey()
+        pressGlobalHotkey(in: textEdit)
         _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.sessionStarts == before.sessionStarts + 1
         }
@@ -598,28 +604,29 @@ final class TimbreUITests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    /// Posts through the macOS event system so Carbon receives a real registered
-    /// shortcut without XCTest waiting for the foreground app to become idle
-    /// between rapid presses.
-    private func postGlobalHotkey(repetitions: Int = 1) {
-        let source = CGEventSource(stateID: .combinedSessionState)
-        for _ in 0..<repetitions {
-            let keyDown = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 40,
-                keyDown: true
-            )
-            keyDown?.flags = [.maskControl, .maskShift]
-            keyDown?.post(tap: .cghidEventTap)
-
-            let keyUp = CGEvent(
-                keyboardEventSource: source,
-                virtualKey: 40,
-                keyDown: false
-            )
-            keyUp?.flags = [.maskControl, .maskShift]
-            keyUp?.post(tap: .cghidEventTap)
+    private func armShortcutBurst(
+        after snapshot: ProbeSnapshot,
+        extraInvocations: Int = 3
+    ) throws -> ProbeSnapshot {
+        let command = ShortcutBurstCommand(
+            generation: snapshot.shortcutBurstsArmed + 1,
+            extraInvocations: extraInvocations
+        )
+        let data = try JSONEncoder().encode(command)
+        let commandURL = backgroundProbeURL.deletingPathExtension()
+            .appendingPathExtension("shortcut-burst.json")
+        try data.write(to: commandURL, options: .atomic)
+        return try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.shortcutBurstsArmed == snapshot.shortcutBurstsArmed + 1
         }
+    }
+
+    /// Uses XCTest's event channel so a clean test machine does not need to grant
+    /// Accessibility or Input Monitoring access to the XCTest runner. The event
+    /// still enters through macOS and exercises the registered Carbon shortcut.
+    @MainActor
+    private func pressGlobalHotkey(in application: XCUIApplication) {
+        application.typeKey("k", modifierFlags: [.control, .shift])
     }
 
     private func hierarchy(_ app: XCUIApplication, _ message: String) -> String {
@@ -633,8 +640,15 @@ private struct ProbeSnapshot: Codable {
     let installAttempts: Int
     let sessionStarts: Int
     let sessionStops: Int
+    let shortcutBurstsArmed: Int
+    let shortcutBurstInvocations: Int
     let pasteAttempts: Int
     let successfulPastes: Int
     let lastPasteText: String?
     let lastDeliveryResult: String?
+}
+
+private struct ShortcutBurstCommand: Codable {
+    let generation: Int
+    let extraInvocations: Int
 }

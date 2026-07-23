@@ -71,6 +71,8 @@ final class IntegrationTestProbeTests: XCTestCase {
         let first = IntegrationTestProbe(url: url, reset: true)
         first.recordInstallAttempt()
         first.recordSessionStarted()
+        first.recordShortcutBurstArmed()
+        first.recordShortcutBurstInvocation()
         first.recordPasteAttempt(text: "hello", succeeded: true)
         first.recordDeliveryResult(.pasteEventPosted)
 
@@ -78,6 +80,8 @@ final class IntegrationTestProbeTests: XCTestCase {
         XCTAssertEqual(second.snapshot.generation, 2)
         XCTAssertEqual(second.snapshot.installAttempts, 1)
         XCTAssertEqual(second.snapshot.sessionStarts, 1)
+        XCTAssertEqual(second.snapshot.shortcutBurstsArmed, 1)
+        XCTAssertEqual(second.snapshot.shortcutBurstInvocations, 1)
         XCTAssertEqual(second.snapshot.successfulPastes, 1)
         XCTAssertEqual(second.snapshot.lastPasteText, "hello")
         XCTAssertEqual(second.snapshot.lastDeliveryResult, "pasteEventPosted")
@@ -234,5 +238,24 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
         XCTAssertTrue(onboarding.hasAssignedShortcut)
         XCTAssertEqual(onboarding.displayString, "⌃⇧K")
         XCTAssertEqual(global.displayString, "⌃⇧K")
+    }
+
+    func testIntegrationBurstInvokesTheRegisteredHandlerWithoutHIDPosting() {
+        let service = KeyboardShortcutsGlobalShortcutService(
+            name: .integrationTestToggleDictation
+        )
+        var handlerInvocations = 0
+        var burstInvocations = 0
+        service.setHandler {
+            handlerInvocations += 1
+        }
+        service.armIntegrationTestBurst(extraInvocations: 3) {
+            burstInvocations += 1
+        }
+
+        service.invokeKeyUpForUnitTesting()
+
+        XCTAssertEqual(handlerInvocations, 4)
+        XCTAssertEqual(burstInvocations, 3)
     }
 }

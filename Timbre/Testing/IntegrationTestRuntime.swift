@@ -31,6 +31,11 @@ struct IntegrationTestConfiguration: Equatable {
     let showsMenuHost: Bool
     let probeURL: URL
 
+    var shortcutBurstURL: URL {
+        probeURL.deletingPathExtension()
+            .appendingPathExtension("shortcut-burst.json")
+    }
+
     static func isRequested(arguments: [String]) -> Bool {
         arguments.contains(argument)
     }
@@ -76,10 +81,17 @@ struct IntegrationProbeSnapshot: Codable, Equatable {
     var installAttempts = 0
     var sessionStarts = 0
     var sessionStops = 0
+    var shortcutBurstsArmed = 0
+    var shortcutBurstInvocations = 0
     var pasteAttempts = 0
     var successfulPastes = 0
     var lastPasteText: String?
     var lastDeliveryResult: String?
+}
+
+private struct IntegrationShortcutBurstCommand: Codable {
+    let generation: Int
+    let extraInvocations: Int
 }
 
 @MainActor
@@ -121,6 +133,16 @@ final class IntegrationTestProbe {
 
     func recordSessionStopped() {
         snapshot.sessionStops += 1
+        persist()
+    }
+
+    func recordShortcutBurstArmed() {
+        snapshot.shortcutBurstsArmed += 1
+        persist()
+    }
+
+    func recordShortcutBurstInvocation() {
+        snapshot.shortcutBurstInvocations += 1
         persist()
     }
 
@@ -216,6 +238,7 @@ final class IntegrationTestRuntime {
     let shortcutOnboarding: KeyboardShortcutsOnboardingAdapter
     let shortcutService: KeyboardShortcutsGlobalShortcutService
     let transcription: IntegrationTranscriptionService
+    private var shortcutBurstMonitorTask: Task<Void, Never>?
 
     init(configuration: IntegrationTestConfiguration) {
         self.configuration = configuration
@@ -292,6 +315,43 @@ final class IntegrationTestRuntime {
             accessibility: accessibility,
             probe: probe
         )
+
+        startShortcutBurstMonitor()
+    }
+
+    deinit {
+        shortcutBurstMonitorTask?.cancel()
+    }
+
+    private func startShortcutBurstMonitor() {
+        let commandURL = configuration.shortcutBurstURL
+        let initialGeneration = probe.snapshot.shortcutBurstsArmed
+        shortcutBurstMonitorTask = Task { [weak self] in
+            var consumedGeneration = initialGeneration
+            while !Task.isCancelled {
+                if let data = try? Data(contentsOf: commandURL),
+                   let command = try? JSONDecoder().decode(
+                       IntegrationShortcutBurstCommand.self,
+                       from: data
+                   ),
+                   command.generation > consumedGeneration
+                {
+                    consumedGeneration = command.generation
+                    self?.armShortcutBurst(command)
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+        }
+    }
+
+    private func armShortcutBurst(_ command: IntegrationShortcutBurstCommand) {
+        guard command.extraInvocations > 0 else { return }
+        shortcutService.armIntegrationTestBurst(
+            extraInvocations: command.extraInvocations
+        ) { [weak probe] in
+            probe?.recordShortcutBurstInvocation()
+        }
+        probe.recordShortcutBurstArmed()
     }
 
     func cleanupPersistentStateIfRequested() {
@@ -300,6 +360,7 @@ final class IntegrationTestRuntime {
         defaults.synchronize()
         KeyboardShortcuts.reset(.integrationTestToggleDictation)
         try? FileManager.default.removeItem(at: configuration.probeURL)
+        try? FileManager.default.removeItem(at: configuration.shortcutBurstURL)
     }
 
     func makeDelivery(
