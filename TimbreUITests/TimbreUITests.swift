@@ -1,182 +1,640 @@
+import AppKit
 import XCTest
 
 final class TimbreUITests: XCTestCase {
+    private static let transcript = "Integration dictation"
+
+    private var app: XCUIApplication?
+    private var textEdit: XCUIApplication?
+    private var temporaryDirectory: URL!
+    private var foregroundProbeURL: URL!
+    private var backgroundProbeURL: URL!
+    private var foregroundProfile: String!
+    private var backgroundProfile: String!
+    private var isRecordingFailureArtifacts = false
+
     override func setUpWithError() throws {
         continueAfterFailure = false
+        temporaryDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TimbreFullIntegration-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: temporaryDirectory,
+            withIntermediateDirectories: true
+        )
+        foregroundProbeURL = temporaryDirectory.appendingPathComponent("foreground.json")
+        backgroundProbeURL = temporaryDirectory.appendingPathComponent("background.json")
+        foregroundProfile = "foreground-\(UUID().uuidString)"
+        backgroundProfile = "background-\(UUID().uuidString)"
+    }
+
+    override func tearDownWithError() throws {
+        app?.terminate()
+        textEdit?.terminate()
+        for profile in [foregroundProfile, backgroundProfile].compactMap({ $0 }) {
+            let domain = "com.augustdrakton.Timbre.integration.\(profile)"
+            UserDefaults(suiteName: domain)?.removePersistentDomain(forName: domain)
+        }
+        let appDefaults = UserDefaults(suiteName: "com.augustdrakton.Timbre")
+        appDefaults?.removeObject(forKey: "KeyboardShortcuts_integrationTestToggleDictation")
+        appDefaults?.synchronize()
+        try? FileManager.default.removeItem(at: temporaryDirectory)
+    }
+
+    override func record(_ issue: XCTIssue) {
+        if !isRecordingFailureArtifacts {
+            isRecordingFailureArtifacts = true
+            if let app, app.state != .notRunning {
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.name = "Timbre failure"
+                screenshot.lifetime = .keepAlways
+                add(screenshot)
+            }
+            for (name, url) in [
+                ("Foreground probe", foregroundProbeURL),
+                ("Background probe", backgroundProbeURL),
+            ] {
+                if let url, let data = try? Data(contentsOf: url) {
+                    let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+                    attachment.name = name
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                }
+            }
+            isRecordingFailureArtifacts = false
+        }
+        super.record(issue)
     }
 
     @MainActor
-    func testDebugWindowMockDictationAndScreenshot() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--debug-window", "--mock-transcription"]
-        app.launch()
-        app.activate()
+    func testFullApplicationLifecycle() throws {
+        try runForegroundOnboarding()
+        try runBackgroundOnboarding()
+        try runNormalDictationAndBusyStates()
+        try runSecondLaunchWithoutHostOrRebuild()
+        try runSetupRecoveryScenarios()
+        try runDeliverySafetyScenarios()
+        try runQuit()
+    }
 
-        let debugWindow = app.windows["Timbre Debug"]
+    // MARK: - Major phases
+
+    @MainActor
+    private func runForegroundOnboarding() throws {
+        let app = launch(
+            profile: foregroundProfile,
+            scenario: "foregroundOnboarding",
+            probeURL: foregroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        try completeWelcomeAndRecordShortcut(in: app)
+
         XCTAssertTrue(
-            debugWindow.waitForExistence(timeout: 10),
-            "Expected AppKit debug window. Hierarchy:\n\(app.debugDescription)"
+            app.staticTexts["Microphone Access"].waitForExistence(timeout: 3),
+            hierarchy(app, "Expected the microphone step")
         )
-
-        let start = debugWindow.buttons["startButton"]
-        XCTAssertTrue(start.waitForExistence(timeout: 5))
-        start.click()
-
-        let stop = debugWindow.buttons["stopButton"]
-        XCTAssertTrue(stop.waitForExistence(timeout: 5))
-
-        let transcript = debugWindow.staticTexts["transcriptText"]
-        let heardSpeech = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "label CONTAINS %@", "Hello"),
-            object: transcript
+        let microphoneSettings = app.buttons["setupOpenMicSettingsButton"]
+        XCTAssertTrue(
+            microphoneSettings.waitForExistence(timeout: 5),
+            hierarchy(app, "Expected microphone denial recovery")
         )
-        _ = XCTWaiter.wait(for: [heardSpeech], timeout: 2)
+        microphoneSettings.click()
+        app.buttons["setupMicRetryButton"].click()
 
-        stop.click()
+        let textInsertionContinue = app.buttons["setupTextInsertionContinueButton"]
+        XCTAssertTrue(
+            textInsertionContinue.waitForExistence(timeout: 5),
+            hierarchy(app, "Expected Text Insertion step")
+        )
+        textInsertionContinue.click()
 
-        let copyAgain = debugWindow.buttons["copyAgainButton"]
-        let copyEnabled = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "isEnabled == true"),
-            object: copyAgain
+        let accessibilitySettings = app.buttons["setupOpenAccessibilitySettingsButton"]
+        XCTAssertTrue(
+            accessibilitySettings.waitForExistence(timeout: 5),
+            hierarchy(app, "Expected Accessibility denial recovery")
+        )
+        accessibilitySettings.click()
+        app.buttons["setupAccessibilityRetryButton"].click()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["setupProgress"].waitForExistence(timeout: 5),
+            hierarchy(app, "Expected model preparation")
+        )
+        app.typeKey("k", modifierFlags: [.control, .shift])
+        let beforeFailure = try waitForProbe(foregroundProbeURL, timeout: 3) {
+            $0.installAttempts == 1
+        }
+        XCTAssertEqual(beforeFailure.sessionStarts, 0, "Hotkey must be ignored during setup")
+
+        let retry = app.buttons["setupRetryButton"]
+        XCTAssertTrue(
+            retry.waitForExistence(timeout: 5),
+            hierarchy(app, "Expected first integration install to fail")
+        )
+        retry.click()
+
+        let done = app.buttons["setupDoneButton"]
+        XCTAssertTrue(
+            done.waitForExistence(timeout: 7),
+            hierarchy(app, "Expected Ready after retry")
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [copyEnabled], timeout: 5),
-            .completed,
-            "Expected Copy Again after successful mock transcription"
+            app.descendants(matching: .any)["setupReadyShortcutHint"].label,
+            "Press ⌃⇧K to start dictating anywhere."
         )
+        done.click()
 
-        let screenshot = XCTAttachment(screenshot: debugWindow.screenshot())
-        screenshot.name = "debug-window-mock-dictation"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        let completed = try waitForProbe(foregroundProbeURL, timeout: 3) {
+            $0.installAttempts == 2 && ($0.modelState == "installed" || $0.modelState == "loaded")
+        }
+        XCTAssertEqual(completed.installAttempts, 2)
+        XCTAssertTrue(
+            app.windows["Timbre Integration Menu"].waitForExistence(timeout: 3),
+            hierarchy(app, "Expected the production menu view host")
+        )
+        app.terminate()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 5))
     }
 
     @MainActor
-    func testSimulatedOnboardingWelcomeThroughReady() throws {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--simulate-onboarding",
-            "--simulate-onboarding-duration",
-            "8",
-        ]
-        app.launch()
-        app.activate()
+    private func runBackgroundOnboarding() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "backgroundOnboarding",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        try completeWelcomeAndRecordShortcut(in: app)
 
-        let setupRoot = app.descendants(matching: .any)["setupFlowRoot"]
         XCTAssertTrue(
-            setupRoot.waitForExistence(timeout: 10),
-            "Expected simulated setup window. Hierarchy:\n\(app.debugDescription)"
+            app.staticTexts["Microphone Access"].waitForExistence(timeout: 3),
+            hierarchy(app, "Expected microphone permission progress")
         )
-
-        let welcomeContinue = app.buttons["setupContinueButton"]
-        XCTAssertTrue(welcomeContinue.waitForExistence(timeout: 5))
-        welcomeContinue.click()
-
-        let shortcutContinue = app.buttons["setupShortcutContinueButton"]
-        XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5))
-        XCTAssertTrue(shortcutContinue.isEnabled)
-
-        let setHotkey = app.buttons["setupShortcutSetButton"]
-        XCTAssertTrue(setHotkey.waitForExistence(timeout: 2))
-        setHotkey.click()
-
-        let recordingStatus = app.descendants(matching: .any)["setupShortcutRecordingStatus"]
-        let listening = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Press the shortcut you want to use."),
-            object: recordingStatus
+        let textInsertionContinue = app.buttons["setupTextInsertionContinueButton"]
+        XCTAssertTrue(
+            textInsertionContinue.waitForExistence(timeout: 5),
+            hierarchy(app, "Expected Text Insertion step")
         )
-        XCTAssertEqual(XCTWaiter.wait(for: [listening], timeout: 5), .completed)
-
-        app.typeKey("k", modifierFlags: [.control, .shift])
-        XCTAssertTrue(shortcutContinue.isEnabled)
-        shortcutContinue.click()
+        textInsertionContinue.click()
 
         let background = app.buttons["setupContinueInBackgroundButton"]
         XCTAssertTrue(
             background.waitForExistence(timeout: 5),
-            "Expected preparing step with Continue in Background. Hierarchy:\n\(app.debugDescription)"
+            hierarchy(app, "Expected background preparation control")
         )
-        XCTAssertTrue(app.descendants(matching: .any)["setupProgress"].waitForExistence(timeout: 2))
+        background.click()
+        XCTAssertFalse(
+            app.descendants(matching: .any)["setupFlowRoot"].waitForExistence(timeout: 1),
+            "Setup window should close while preparation continues"
+        )
 
-        // Visual check for the bottom gray bar regression.
-        let screenshot = XCUIScreen.main.screenshot()
-        let attachment = XCTAttachment(screenshot: screenshot)
-        attachment.name = "onboarding-preparing-no-bottom-bar"
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("timbre-onboarding-preparing-check.png")
-        try screenshot.pngRepresentation.write(to: out)
-        NSLog("Wrote onboarding screenshot to \(out.path)")
-
-        // Stay on the window through completion. Close/reopen-without-cancel is covered by
-        // SetupCoordinator unit tests; MenuBarExtra reopen is unreliable in UI automation.
-        let done = app.buttons["setupDoneButton"]
+        let menuWindow = app.windows["Timbre Integration Menu"]
+        XCTAssertTrue(menuWindow.waitForExistence(timeout: 3), hierarchy(app, "Missing menu host"))
         XCTAssertTrue(
-            done.waitForExistence(timeout: 20),
-            "Expected Ready after simulated download. Hierarchy:\n\(app.debugDescription)"
+            menuWindow.descendants(matching: .any)["setupStatusMessage"].waitForExistence(timeout: 3),
+            hierarchy(app, "Menu should expose background setup status")
         )
+        _ = try realStatusItem(in: app)
 
-        let readyHint = app.descendants(matching: .any)["setupReadyShortcutHint"]
+        let firstAttempt = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.installAttempts == 1 && $0.modelState == "downloading"
+        }
+        XCTAssertEqual(firstAttempt.installAttempts, 1)
+
+        let reopen = menuWindow.buttons["setupMenuButton"]
+        XCTAssertTrue(reopen.waitForExistence(timeout: 3), hierarchy(app, "Missing setup reopen"))
+        reopen.click()
         XCTAssertTrue(
-            readyHint.waitForExistence(timeout: 2),
-            "Expected Ready shortcut hint. Hierarchy:\n\(app.debugDescription)"
+            app.descendants(matching: .any)["setupProgress"].waitForExistence(timeout: 3),
+            hierarchy(app, "Reopened setup should retain live progress")
         )
+        XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, 1)
+        app.buttons["setupContinueInBackgroundButton"].click()
 
-        done.click()
+        XCTAssertTrue(
+            menuWindow.buttons["startButton"].waitForExistence(timeout: 7),
+            hierarchy(app, "Menu did not become ready after background preparation")
+        )
+        let ready = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.installAttempts == 1 && ($0.modelState == "installed" || $0.modelState == "loaded")
+        }
+        XCTAssertEqual(ready.installAttempts, 1)
     }
 
     @MainActor
-    func testHotkeyButtonRecordsShortcutDuringSimulatedOnboarding() throws {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "--simulate-onboarding",
-            "--simulate-onboarding-duration",
-            "2",
-            "--simulate-onboarding-step",
-            "shortcut-empty",
-        ]
-        app.launch()
-        app.activate()
+    private func runNormalDictationAndBusyStates() throws {
+        guard let app else { return XCTFail("Background app was not launched") }
+        let textEdit = launchTextEdit()
+        let initial = try readProbe(backgroundProbeURL)
 
-        let hotkeyDisplay = app.descendants(matching: .any)["setupShortcutDisplay"]
+        textEdit.activate()
+        postGlobalHotkey(repetitions: 4)
+        let listening = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.sessionStarts == initial.sessionStarts + 1
+        }
+        XCTAssertEqual(listening.sessionStarts, initial.sessionStarts + 1)
+        XCTAssertEqual(listening.sessionStops, initial.sessionStops)
+
+        postGlobalHotkey(repetitions: 4)
+        let inserted = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.successfulPastes == initial.successfulPastes + 1
+        }
+        XCTAssertEqual(inserted.sessionStarts, initial.sessionStarts + 1)
+        XCTAssertEqual(inserted.sessionStops, initial.sessionStops + 1)
+        XCTAssertEqual(inserted.lastPasteText, Self.transcript)
+        XCTAssertEqual(inserted.lastDeliveryResult, "pasteEventPosted")
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
+
+        app.activate()
+        let menuWindow = app.windows["Timbre Integration Menu"]
         XCTAssertTrue(
-            hotkeyDisplay.waitForExistence(timeout: 10),
-            "Expected the custom hotkey display. Hierarchy:\n\(app.debugDescription)"
+            waitForLabel(menuWindow.descendants(matching: .any)["statusMessage"], "Inserted."),
+            hierarchy(app, "Expected inserted completion status")
         )
+
+        let pasteAttemptsBeforeCopy = inserted.pasteAttempts
+        menuWindow.buttons["copyAgainButton"].click()
+        XCTAssertTrue(
+            waitForLabel(
+                menuWindow.descendants(matching: .any)["statusMessage"],
+                "Copied to clipboard."
+            )
+        )
+        XCTAssertEqual(try readProbe(backgroundProbeURL).pasteAttempts, pasteAttemptsBeforeCopy)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
+
+        textEdit.activate()
+        app.activate()
+        let beforeMenuSession = try readProbe(backgroundProbeURL)
+        menuWindow.buttons["startButton"].click()
+        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.sessionStarts == beforeMenuSession.sessionStarts + 1
+        }
+        menuWindow.buttons["stopButton"].click()
+        let menuInserted = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.successfulPastes == beforeMenuSession.successfulPastes + 1
+        }
+        XCTAssertEqual(menuInserted.lastDeliveryResult, "pasteEventPosted")
+    }
+
+    @MainActor
+    private func runSecondLaunchWithoutHostOrRebuild() throws {
+        app?.terminate()
+        XCTAssertTrue(app?.wait(for: .notRunning, timeout: 5) == true)
+
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "normal",
+            probeURL: backgroundProbeURL,
+            reset: false,
+            menuHost: false
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["setupFlowRoot"].waitForExistence(timeout: 2),
+            hierarchy(app, "A completed profile must not reopen onboarding")
+        )
+        XCTAssertEqual(app.windows.count, 0, "Second launch should be menu-bar-only")
+        let statusItem = try realStatusItem(in: app)
+        statusItem.click()
+        XCTAssertTrue(
+            waitForLabel(
+                app.descendants(matching: .any)["shortcutHint"],
+                "Press ⌃⇧K to start"
+            ),
+            hierarchy(app, "The second launch did not preserve the integration hotkey")
+        )
+        statusItem.click()
+
+        let relaunched = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.generation >= 2 && $0.installAttempts == 1
+        }
+        let textEdit = launchTextEdit()
+        textEdit.activate()
+        postGlobalHotkey()
+        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.sessionStarts == relaunched.sessionStarts + 1
+        }
+        postGlobalHotkey()
+        let readyUse = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.successfulPastes == relaunched.successfulPastes + 1
+        }
+        XCTAssertEqual(readyUse.installAttempts, 1, "Relaunch must reuse the installed model")
+    }
+
+    @MainActor
+    private func runSetupRecoveryScenarios() throws {
+        let startingInstallAttempts = try readProbe(backgroundProbeURL).installAttempts
+
+        var app = relaunchBackground(scenario: "clearShortcut", menuHost: true)
+        let shortcutContinue = app.buttons["setupShortcutContinueButton"]
+        XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5), hierarchy(app, "Missing shortcut recovery"))
+        XCTAssertFalse(shortcutContinue.isEnabled)
+        try recordShortcut(in: app, mayAdvanceAutomatically: true)
+        if shortcutContinue.exists {
+            shortcutContinue.click()
+        }
+        if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
+            app.buttons["setupDoneButton"].click()
+        }
+        XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, startingInstallAttempts)
+
+        app = relaunchBackground(scenario: "microphoneRevoked", menuHost: true)
+        XCTAssertTrue(
+            app.buttons["setupOpenMicSettingsButton"].waitForExistence(timeout: 5),
+            hierarchy(app, "Missing microphone recovery")
+        )
+        app.buttons["setupOpenMicSettingsButton"].click()
+        app.buttons["setupMicRetryButton"].click()
+        if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
+            app.buttons["setupDoneButton"].click()
+        }
+        XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, startingInstallAttempts)
+
+        app = relaunchBackground(scenario: "accessibilityRevoked", menuHost: true)
+        XCTAssertTrue(
+            app.buttons["setupOpenAccessibilitySettingsButton"].waitForExistence(timeout: 5),
+            hierarchy(app, "Missing Accessibility recovery")
+        )
+        app.buttons["setupOpenAccessibilitySettingsButton"].click()
+        app.buttons["setupAccessibilityRetryButton"].click()
+        if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
+            app.buttons["setupDoneButton"].click()
+        }
+        XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, startingInstallAttempts)
+    }
+
+    @MainActor
+    private func runDeliverySafetyScenarios() throws {
+        try runFallbackScenario(
+            scenario: "normal",
+            expectedResult: "copiedAfterInsertFailure.frontmostChanged"
+        ) { textEdit, _, _ in
+            let finder = XCUIApplication(bundleIdentifier: "com.apple.finder")
+            finder.activate()
+            self.postGlobalHotkey()
+        }
+
+        try runFallbackScenario(
+            scenario: "normal",
+            expectedResult: "copiedAfterInsertFailure.targetTerminated"
+        ) { textEdit, app, _ in
+            textEdit.terminate()
+            XCTAssertTrue(textEdit.wait(for: .notRunning, timeout: 5))
+            app.activate()
+            self.postGlobalHotkey()
+        }
+
+        for (scenario, result) in [
+            ("accessibilityRevokedDuringDelivery", "copiedAfterInsertFailure.accessibilityUntrusted"),
+            ("secureInput", "copiedAfterInsertFailure.secureInputField"),
+            ("pasteboardRace", "copiedAfterInsertFailure.pasteboardChanged"),
+            ("eventPostFailure", "copiedAfterInsertFailure.eventPostFailed"),
+        ] {
+            try runFallbackScenario(scenario: scenario, expectedResult: result) {
+                textEdit, _, _ in
+                self.postGlobalHotkey()
+            }
+        }
+    }
+
+    @MainActor
+    private func runQuit() throws {
+        let app = relaunchBackground(scenario: "cleanup", menuHost: true)
+        let quit = app.windows["Timbre Integration Menu"].buttons["quitButton"]
+        XCTAssertTrue(quit.waitForExistence(timeout: 5), hierarchy(app, "Missing Quit"))
+        quit.click()
+        XCTAssertTrue(app.wait(for: .notRunning, timeout: 5), "Quit must terminate Timbre")
+    }
+
+    // MARK: - Scenario helpers
+
+    @MainActor
+    private func runFallbackScenario(
+        scenario: String,
+        expectedResult: String,
+        stop: (XCUIApplication, XCUIApplication, ProbeSnapshot) throws -> Void
+    ) throws {
+        let app = relaunchBackground(scenario: scenario, menuHost: true)
+        let textEdit = launchTextEdit()
+        let before = try readProbe(backgroundProbeURL)
+        textEdit.activate()
+        postGlobalHotkey()
+        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.sessionStarts == before.sessionStarts + 1
+        }
+
+        try stop(textEdit, app, before)
+        let result = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.lastDeliveryResult == expectedResult
+        }
+        XCTAssertEqual(result.successfulPastes, before.successfulPastes)
+        XCTAssertEqual(result.lastDeliveryResult, expectedResult)
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
+
+        app.activate()
+        XCTAssertTrue(
+            waitForLabel(
+                app.windows["Timbre Integration Menu"]
+                    .descendants(matching: .any)["statusMessage"],
+                "Couldn't insert text. Copied instead."
+            ),
+            hierarchy(app, "Expected insertion fallback status")
+        )
+    }
+
+    @MainActor
+    private func completeWelcomeAndRecordShortcut(in app: XCUIApplication) throws {
+        let welcome = app.buttons["setupContinueButton"]
+        XCTAssertTrue(welcome.waitForExistence(timeout: 10), hierarchy(app, "Missing Welcome"))
+        welcome.click()
 
         let shortcutContinue = app.buttons["setupShortcutContinueButton"]
-        XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5))
-        XCTAssertFalse(shortcutContinue.isEnabled)
+        XCTAssertTrue(
+            shortcutContinue.waitForExistence(timeout: 5),
+            hierarchy(app, "Missing shortcut step")
+        )
+        XCTAssertFalse(shortcutContinue.isEnabled, "Fresh integration shortcut must be unset")
+        try recordShortcut(in: app)
+        XCTAssertTrue(shortcutContinue.isEnabled)
+        shortcutContinue.click()
+    }
 
+    @MainActor
+    private func recordShortcut(
+        in app: XCUIApplication,
+        mayAdvanceAutomatically: Bool = false
+    ) throws {
         let setHotkey = app.buttons["setupShortcutSetButton"]
-        XCTAssertTrue(setHotkey.waitForExistence(timeout: 5))
+        XCTAssertTrue(setHotkey.waitForExistence(timeout: 5), hierarchy(app, "Missing Set hotkey"))
         setHotkey.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["setupShortcutRecordingStatus"]
+                .waitForExistence(timeout: 2)
+        )
+        app.typeKey("k", modifierFlags: [.control, .shift])
+        let assigned = app.descendants(matching: .any)["setupShortcutKeyCaps"]
+        if assigned.waitForExistence(timeout: mayAdvanceAutomatically ? 1 : 5) {
+            XCTAssertEqual(assigned.label, "Current hotkey ⌃⇧K")
+            return
+        }
 
-        let recordingStatus = app.descendants(matching: .any)["setupShortcutRecordingStatus"]
-        let listening = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", "Press the shortcut you want to use."),
-            object: recordingStatus
+        guard mayAdvanceAutomatically else {
+            return XCTFail("Shortcut was not recorded. \(hierarchy(app, "Missing assigned shortcut"))")
+        }
+        let readyHint = app.descendants(matching: .any)["setupReadyShortcutHint"]
+        XCTAssertTrue(
+            readyHint.waitForExistence(timeout: 5),
+            hierarchy(app, "Shortcut recovery did not restore readiness")
+        )
+        XCTAssertEqual(readyHint.label, "Press ⌃⇧K to start dictating anywhere.")
+    }
+
+    @MainActor
+    private func launch(
+        profile: String,
+        scenario: String,
+        probeURL: URL,
+        reset: Bool,
+        menuHost: Bool
+    ) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments = ["--integration-test"]
+        app.launchEnvironment = [
+            "TIMBRE_INTEGRATION_PROFILE": profile,
+            "TIMBRE_INTEGRATION_SCENARIO": scenario,
+            "TIMBRE_INTEGRATION_RESET": reset ? "1" : "0",
+            "TIMBRE_INTEGRATION_MENU_HOST": menuHost ? "1" : "0",
+            "TIMBRE_INTEGRATION_PROBE": probeURL.path,
+        ]
+        app.launch()
+        self.app = app
+        return app
+    }
+
+    @MainActor
+    private func relaunchBackground(
+        scenario: String,
+        menuHost: Bool
+    ) -> XCUIApplication {
+        app?.terminate()
+        _ = app?.wait(for: .notRunning, timeout: 5)
+        return launch(
+            profile: backgroundProfile,
+            scenario: scenario,
+            probeURL: backgroundProbeURL,
+            reset: false,
+            menuHost: menuHost
+        )
+    }
+
+    @MainActor
+    private func launchTextEdit() -> XCUIApplication {
+        textEdit?.terminate()
+        let textEdit = XCUIApplication(bundleIdentifier: "com.apple.TextEdit")
+        textEdit.launch()
+        self.textEdit = textEdit
+        return textEdit
+    }
+
+    @MainActor
+    private func realStatusItem(in app: XCUIApplication) throws -> XCUIElement {
+        let inApp = app.descendants(matching: .any)["timbreStatusItem"]
+        if inApp.waitForExistence(timeout: 2) {
+            return inApp
+        }
+        let systemUIServer = XCUIApplication(bundleIdentifier: "com.apple.systemuiserver")
+        let systemItem = systemUIServer.descendants(matching: .any)["timbreStatusItem"]
+        XCTAssertTrue(
+            systemItem.waitForExistence(timeout: 3),
+            hierarchy(app, "Real Timbre status item was not exposed")
+        )
+        return systemItem
+    }
+
+    // MARK: - Probe and wait helpers
+
+    private func readProbe(_ url: URL) throws -> ProbeSnapshot {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(ProbeSnapshot.self, from: data)
+    }
+
+    private func waitForProbe(
+        _ url: URL,
+        timeout: TimeInterval,
+        predicate: @escaping (ProbeSnapshot) -> Bool
+    ) throws -> ProbeSnapshot {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate { [weak self] _, _ in
+                guard let self,
+                      let snapshot = try? self.readProbe(url)
+                else {
+                    return false
+                }
+                return predicate(snapshot)
+            },
+            object: url
         )
         XCTAssertEqual(
-            XCTWaiter.wait(for: [listening], timeout: 5),
+            XCTWaiter.wait(for: [expectation], timeout: timeout),
             .completed,
-            "Expected recording guidance after pressing Set hotkey. Current value: \(String(describing: recordingStatus.value))"
+            "Timed out waiting for probe condition at \(url.path)"
         )
-
-        app.typeKey("k", modifierFlags: [.control, .shift])
-
-        let assignedHotkey = app.descendants(matching: .any)["setupShortcutKeyCaps"]
-        XCTAssertTrue(
-            assignedHotkey.waitForExistence(timeout: 5),
-            "Expected Control-Shift-K above the button. Hierarchy:\n\(app.debugDescription)"
-        )
-        XCTAssertEqual(assignedHotkey.label, "Current hotkey ⌃⇧K")
-        XCTAssertTrue(shortcutContinue.isEnabled)
-
-        let screenshot = XCTAttachment(screenshot: app.windows["Timbre"].screenshot())
-        screenshot.name = "onboarding-custom-hotkey-control"
-        screenshot.lifetime = .keepAlways
-        add(screenshot)
+        return try readProbe(url)
     }
+
+    private func waitForLabel(
+        _ element: XCUIElement,
+        _ label: String,
+        timeout: TimeInterval = 5
+    ) -> Bool {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate { object, _ in
+                guard let element = object as? XCUIElement else { return false }
+                return element.label == label || element.value as? String == label
+            },
+            object: element
+        )
+        return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+    }
+
+    /// Posts through the macOS event system so Carbon receives a real registered
+    /// shortcut without XCTest waiting for the foreground app to become idle
+    /// between rapid presses.
+    private func postGlobalHotkey(repetitions: Int = 1) {
+        let source = CGEventSource(stateID: .combinedSessionState)
+        for _ in 0..<repetitions {
+            let keyDown = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: 40,
+                keyDown: true
+            )
+            keyDown?.flags = [.maskControl, .maskShift]
+            keyDown?.post(tap: .cghidEventTap)
+
+            let keyUp = CGEvent(
+                keyboardEventSource: source,
+                virtualKey: 40,
+                keyDown: false
+            )
+            keyUp?.flags = [.maskControl, .maskShift]
+            keyUp?.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func hierarchy(_ app: XCUIApplication, _ message: String) -> String {
+        "\(message). Hierarchy:\n\(app.debugDescription)"
+    }
+}
+
+private struct ProbeSnapshot: Codable {
+    let generation: Int
+    let modelState: String
+    let installAttempts: Int
+    let sessionStarts: Int
+    let sessionStops: Int
+    let pasteAttempts: Int
+    let successfulPastes: Int
+    let lastPasteText: String?
+    let lastDeliveryResult: String?
 }

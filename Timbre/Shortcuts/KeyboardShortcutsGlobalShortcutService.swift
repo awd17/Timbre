@@ -6,22 +6,27 @@ import KeyboardShortcuts
 /// Uses `onKeyUp` + `removeHandler` (no throwing registration API).
 @MainActor
 final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
+    private let name: KeyboardShortcuts.Name
     private var handler: (() -> Void)?
     private var didStart = false
 
+    init(name: KeyboardShortcuts.Name = .toggleDictation) {
+        self.name = name
+    }
+
     var isListening: Bool {
-        KeyboardShortcuts.isEnabled(for: .toggleDictation)
+        KeyboardShortcuts.isEnabled(for: name)
     }
 
     var displayString: String {
-        DictationShortcutName.displayString
+        DictationShortcutName.displayString(for: name)
     }
 
     func start() {
         // Idempotent: clear any prior handler for this name before adding one.
-        KeyboardShortcuts.removeHandler(for: .toggleDictation)
+        KeyboardShortcuts.removeHandler(for: name)
 
-        KeyboardShortcuts.onKeyUp(for: .toggleDictation) { [weak self] in
+        KeyboardShortcuts.onKeyUp(for: name) { [weak self] in
             Task { @MainActor in
                 self?.handler?()
             }
@@ -39,7 +44,7 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
 
     func stop() {
         guard didStart else { return }
-        KeyboardShortcuts.removeHandler(for: .toggleDictation)
+        KeyboardShortcuts.removeHandler(for: name)
         handler = nil
         didStart = false
         TimbreLog.line("Timbre shortcut: stopped")

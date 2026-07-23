@@ -44,8 +44,12 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 ## Test
 
 ```bash
-xcodebuild -scheme Timbre -destination 'platform=macOS' test
+scripts/run-full-integration-test.sh
 ```
+
+This builds the test bundle once, then runs all unit tests and the single
+full-application UI lifecycle without rebuilding. See
+[`docs/FULL_APPLICATION_INTEGRATION_TEST.md`](docs/FULL_APPLICATION_INTEGRATION_TEST.md).
 
 ## Run
 
@@ -61,14 +65,14 @@ Parakeet is the default engine in **Debug and Release**. No backend launch argum
 | Launch argument | Effect |
 |-----------------|--------|
 | *(none)* | Parakeet batch dictation + microphone. Setup appears when the model, mic, Accessibility, or shortcut confirmation is not ready. |
-| `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup (unless combined with `--simulate-onboarding`). |
+| `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup. |
 | `--apple-speech` | Debug only. Apple Speech comparison backend. Disables Parakeet setup. |
 | `--parakeet-fixture` | Debug only. Run the committed WAV through the app path (no mic). Disables automatic setup. |
 | `--parakeet-transcription` | Deprecated no-op. Parakeet is already the default; logged once. |
 | `--debug-window` | Debug only. Opens the Timbre Debug window. |
 | `--disable-setup` | Debug only. Disables the automatic first-run setup window. |
 | `--disable-model-prewarm` | Debug only. Disables background model prewarming (Start still loads via `ensureLoaded`). |
-| `--simulate-onboarding` | Debug only. Isolated fake onboarding (no real download, permissions, hotkey, or paste). See [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md). |
+| `--integration-test` | Debug only. Unified automated app lifecycle; configured by test environment variables. |
 
 Release builds ignore all of the DEBUG-only flags above.
 

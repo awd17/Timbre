@@ -55,7 +55,11 @@ and conflict alerts after the button is pressed.
 
 Continue is disabled when the assigned shortcut is nil. Ready and menu hints read the same live display string.
 
-DEBUG `--simulate-onboarding` uses the same recorder capture path with an isolated shortcut name, so UI tests exercise key capture without mutating the developer’s real chord. Optional `--simulate-onboarding-real-recorder` points the recorder at the production shortcut for interactive QA only.
+The DEBUG full-app integration runtime injects
+`.integrationTestToggleDictation` into the same recorder, onboarding adapter,
+and global shortcut service. The lifecycle test therefore records and invokes
+a real Carbon hotkey without mutating the production `.toggleDictation`
+assignment.
 
 ## Toggle behavior
 
@@ -98,7 +102,18 @@ xcodebuild -scheme Timbre -destination 'platform=macOS' -only-testing:TimbreTest
 
 Uses `FakeGlobalShortcutService` — no real system hotkeys.
 
-### Manual (required for global behavior)
+### Full-app automation
+
+```bash
+scripts/run-full-integration-test.sh
+```
+
+The single lifecycle test records `⌃⇧K`, invokes it through real Carbon
+registration in TextEdit, exercises busy-state presses and relaunch, and
+leaves only final Command-V posting behind a deterministic probe. See
+[`FULL_APPLICATION_INTEGRATION_TEST.md`](FULL_APPLICATION_INTEGRATION_TEST.md).
+
+### Manual supplemental check
 
 1. Build Debug and Release.
 2. Launch Timbre; complete setup if needed (including shortcut confirmation).
@@ -113,7 +128,6 @@ Uses `FakeGlobalShortcutService` — no real system hotkeys.
 11. Menu Start/Stop still behave the same (menu path may briefly reactivate the captured target).
 12. DEBUG `--mock-transcription` toggle works without posting real paste events.
 13. `--parakeet-fixture` skips global shortcut registration.
-14. `--simulate-onboarding` skips global shortcut registration.
 
 ## Related
 

@@ -6,7 +6,9 @@ Developer notes for Timbre’s background Parakeet load that reduces first-Start
 
 After setup readiness (installed model + microphone + Accessibility + confirmed assigned shortcut), Timbre loads the on-disk Parakeet model into memory in the background. Dictation Start joins the same single-flight load when prewarming is still in progress.
 
-DEBUG `--simulate-onboarding` disables real prewarming (no FluidAudio). Menu visual polish remains later work.
+The DEBUG full-app integration runtime prewarms its persistent fake model. It
+never accesses FluidAudio or the network, but exercises the same readiness and
+prewarm orchestration as production.
 
 ## Why first Start was previously slow
 
@@ -161,7 +163,8 @@ Look for `Timbre prewarm:` and `Timbre model:` on stderr:
 
 - Load still runs on the main actor (FluidAudio / manager are `@MainActor`); measure Ready/menu responsiveness during load.
 - No unload-on-idle.
-- Fixture, mock, Apple Speech, setup-disabled, and `--simulate-onboarding` DEBUG paths do not prewarm.
+- Fixture, mock, Apple Speech, and setup-disabled DEBUG paths do not prewarm.
+- The full-app integration path prewarms the persistent fake model through the production coordinator.
 - Does not redesign the menu popover.
 
 ## Related

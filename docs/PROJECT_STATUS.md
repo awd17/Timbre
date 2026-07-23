@@ -44,7 +44,8 @@ The UI and the controller do not depend on a specific speech engine.
 - Dictation readiness requires installed model, granted microphone, Accessibility trust, **and** a confirmed assigned shortcut
 - **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; onboarding Recorder; toggle Start/Stop)
 - **Model prewarming** after setup readiness (`loadInstalledAndRetain`; never downloads; Start joins single-flight load)
-- **Onboarding visual polish** (branded setup window + background asset; DEBUG `--simulate-onboarding`)
+- **Onboarding visual polish** (branded setup window + background asset)
+- **Unified full-app integration lifecycle** (one UI test method; build once and relaunch the same binary)
 
 ### Not started / out of this milestone
 
@@ -133,8 +134,8 @@ Timbre/
     SetupCoordinator.swift
     SetupWindowController.swift
     SetupFlowView.swift
-    SimulatedOnboarding.swift          DEBUG simulation flags
-    SimulatedOnboardingDependencies.swift  DEBUG fakes
+  Testing/
+    IntegrationTestRuntime.swift       DEBUG persistent fake boundaries + JSON probe
   Fixtures/parakeet-smoke-test.wav
   Views/MenuBarDictationView.swift
   Assets.xcassets/OnboardingBackground.imageset/
@@ -142,12 +143,14 @@ Tools/ParakeetSmokeTest/
   Sources/                        Developer CLI
   Fixtures/                       WAV file and script notes
 scripts/run-parakeet-smoke.sh
+scripts/run-full-integration-test.sh
 docs/PARAKEET_SMOKE_TEST.md
 docs/PARAKEET_MICROPHONE_DICTATION.md
 docs/SETUP_AND_MODEL_MANAGEMENT.md
 docs/ONBOARDING_UX.md
 docs/GLOBAL_DICTATION_SHORTCUT.md
 docs/FOCUSED_APP_TEXT_INSERTION.md
+docs/FULL_APPLICATION_INTEGRATION_TEST.md
 TimbreTests/
 TimbreUITests/
 ```
@@ -157,7 +160,8 @@ TimbreUITests/
 - Do not couple SwiftUI views to Speech or AVFoundation.
 - New speech backends must implement `TranscriptionServicing` when they join the interactive app path.
 - Prefer changes to `SessionState` over new controller flags.
-- Keep mock transcription, Apple Speech override, fixture gate, debug window, setup-bypass, and simulated-onboarding flags inside DEBUG-only paths.
+- Keep mock transcription, Apple Speech override, fixture gate, debug window,
+  setup bypass, and the full-app integration runtime inside DEBUG-only paths.
 - Parakeet is the production default in Debug and Release; do not silently fall back to Apple Speech.
 - Automatic setup is on in Release; DEBUG may bypass it for mock / fixture / `--apple-speech` / `--disable-setup`.
 - Distinguish installed (on disk) from loaded (`AsrManager` retained).

@@ -144,14 +144,16 @@ Timbre.app/Contents/MacOS/Timbre --disable-setup
 Timbre.app/Contents/MacOS/Timbre --mock-transcription --debug-window
 Timbre.app/Contents/MacOS/Timbre --apple-speech --debug-window
 Timbre.app/Contents/MacOS/Timbre --parakeet-fixture --debug-window
-Timbre.app/Contents/MacOS/Timbre --simulate-onboarding --simulate-onboarding-duration 2
 ```
 
-See [`ONBOARDING_UX.md`](ONBOARDING_UX.md) for simulated onboarding isolation rules.
+Use `scripts/run-full-integration-test.sh` for isolated automated onboarding,
+menu, relaunch, and delivery coverage. See
+[`FULL_APPLICATION_INTEGRATION_TEST.md`](FULL_APPLICATION_INTEGRATION_TEST.md).
 
 ## Related
 
-- [`ONBOARDING_UX.md`](ONBOARDING_UX.md) — onboarding window, shortcut confirmation, simulation
+- [`ONBOARDING_UX.md`](ONBOARDING_UX.md) — onboarding window and shortcut confirmation
+- [`FULL_APPLICATION_INTEGRATION_TEST.md`](FULL_APPLICATION_INTEGRATION_TEST.md) — unified automated lifecycle
 - [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md) — production mic path uses `ensureLoaded()`
 - [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md) — file smoke CLI (independent of the app manager)
 - [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md) — Accessibility + insertion
