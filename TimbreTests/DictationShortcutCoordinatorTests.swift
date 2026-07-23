@@ -123,6 +123,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
             microphone: mic,
             accessibility: FakeAccessibilityPermission(trustState: .trusted),
             defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            shortcutOnboarding: FakeShortcutOnboarding(),
             featureEnabled: true
         )
         var presented = 0
@@ -145,11 +146,14 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         let controller = makeController()
         let model = FakeParakeetModelManager(initialState: .downloading)
         let mic = FakeMicrophonePermission(status: .granted)
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let setup = SetupCoordinator(
             modelManager: model,
             microphone: mic,
             accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: UserDefaults(suiteName: UUID().uuidString)!,
+            defaults: defaults,
+            shortcutOnboarding: FakeShortcutOnboarding(),
             featureEnabled: true
         )
         var presented = 0

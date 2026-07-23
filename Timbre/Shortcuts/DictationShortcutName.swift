@@ -3,8 +3,8 @@ import KeyboardShortcuts
 /// Named dictation toggle shortcut.
 ///
 /// Temporary pre-release default: Control+Shift+D (`⌃⇧D`).
-/// Change the `default:` value here only. Onboarding polish must add
-/// `KeyboardShortcuts.Recorder` before the first public release.
+/// Change the `default:` value here only. First-run onboarding presents
+/// `KeyboardShortcuts.Recorder` for confirmation / replacement.
 extension KeyboardShortcuts.Name {
     static let toggleDictation = Self(
         "toggleDictation",

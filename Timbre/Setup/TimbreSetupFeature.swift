@@ -4,6 +4,7 @@ import Foundation
 ///
 /// Release: always enabled (developer bypass flags are ignored).
 /// DEBUG: on by default; off for mock, fixture, Apple Speech, or `--disable-setup`.
+/// `--simulate-onboarding` forces setup on unless incompatible flags are present.
 enum TimbreSetupFeature {
     static let disableArgument = "--disable-setup"
 
@@ -21,6 +22,12 @@ enum TimbreSetupFeature {
         guard isDebug else {
             return true
         }
+
+#if DEBUG
+        if SimulatedOnboarding.isRequested(arguments: arguments) {
+            return SimulatedOnboarding.isEnabled(arguments: arguments)
+        }
+#endif
 
         if arguments.contains(TranscriptionBackendSelection.mockArgument) {
             return false

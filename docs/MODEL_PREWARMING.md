@@ -4,9 +4,9 @@ Developer notes for Timbre’s background Parakeet load that reduces first-Start
 
 ## Status
 
-After setup readiness (installed model + microphone + Accessibility), Timbre loads the on-disk Parakeet model into memory in the background. Dictation Start joins the same single-flight load when prewarming is still in progress.
+After setup readiness (installed model + microphone + Accessibility + confirmed assigned shortcut), Timbre loads the on-disk Parakeet model into memory in the background. Dictation Start joins the same single-flight load when prewarming is still in progress.
 
-Visual onboarding/menu polish and shortcut customization remain later work.
+DEBUG `--simulate-onboarding` disables real prewarming (no FluidAudio). Menu visual polish remains later work.
 
 ## Why first Start was previously slow
 
@@ -19,7 +19,7 @@ The first Start called `ensureLoaded()`, which compiled/loaded Core ML models in
 ```text
 App launches (construction does not load)
 → Setup reconciles readiness
-→ Production Parakeet + model installed + mic granted + Accessibility trusted
+→ Production Parakeet + model installed + mic granted + Accessibility trusted + shortcut confirmed/assigned
 → not-eligible → eligible transition
 → ParakeetPrewarmCoordinator calls loadInstalledAndRetain()
 → AsrManager retained (state → loaded)
@@ -161,11 +161,12 @@ Look for `Timbre prewarm:` and `Timbre model:` on stderr:
 
 - Load still runs on the main actor (FluidAudio / manager are `@MainActor`); measure Ready/menu responsiveness during load.
 - No unload-on-idle.
-- Fixture, mock, Apple Speech, and setup-disabled DEBUG paths do not prewarm.
-- Does not redesign onboarding or the menu.
+- Fixture, mock, Apple Speech, setup-disabled, and `--simulate-onboarding` DEBUG paths do not prewarm.
+- Does not redesign the menu popover.
 
 ## Related
 
 - [`SETUP_AND_MODEL_MANAGEMENT.md`](SETUP_AND_MODEL_MANAGEMENT.md)
+- [`ONBOARDING_UX.md`](ONBOARDING_UX.md)
 - [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md)
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md)

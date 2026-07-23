@@ -7,10 +7,17 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
     private let coordinator: SetupCoordinator
     private var window: NSWindow?
     private let shouldRestoreAccessory: () -> Bool
+    /// When true, shortcut step uses KeyboardShortcuts.Recorder; otherwise a simulated control.
+    private let usesRealShortcutRecorder: Bool
 
-    init(coordinator: SetupCoordinator, shouldRestoreAccessory: @escaping () -> Bool) {
+    init(
+        coordinator: SetupCoordinator,
+        shouldRestoreAccessory: @escaping () -> Bool,
+        usesRealShortcutRecorder: Bool = true
+    ) {
         self.coordinator = coordinator
         self.shouldRestoreAccessory = shouldRestoreAccessory
+        self.usesRealShortcutRecorder = usesRealShortcutRecorder
         super.init()
     }
 
@@ -31,19 +38,29 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular)
 
         let setupWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 320),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 440),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        setupWindow.title = "Set Up Timbre"
+        setupWindow.title = "Timbre"
+        setupWindow.titleVisibility = .hidden
+        setupWindow.titlebarAppearsTransparent = true
+        setupWindow.isMovableByWindowBackground = true
         setupWindow.isReleasedWhenClosed = false
         setupWindow.delegate = self
         setupWindow.contentView = NSHostingView(
-            rootView: SetupFlowView(coordinator: coordinator) { [weak self] in
-                self?.dismissAfterReady()
-            }
-            .frame(minWidth: 380, minHeight: 260)
+            rootView: SetupFlowView(
+                coordinator: coordinator,
+                usesRealShortcutRecorder: usesRealShortcutRecorder,
+                onContinueInBackground: { [weak self] in
+                    self?.window?.close()
+                },
+                onDone: { [weak self] in
+                    self?.dismissAfterReady()
+                }
+            )
+            .frame(width: 560, height: 440)
         )
         setupWindow.center()
         setupWindow.makeKeyAndOrderFront(nil)

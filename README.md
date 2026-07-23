@@ -50,24 +50,25 @@ xcodebuild -scheme Timbre -destination 'platform=macOS' test
 ## Run
 
 In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
-On first launch (when the model is not installed), complete setup: microphone → text insertion → download/verify → Done.
-Open the waveform status item, or use the global shortcut **⌃⇧D** to Start/Stop without opening the menu.  
+On first launch (when setup is incomplete), complete onboarding: welcome → choose shortcut → microphone → text insertion → download/verify → Done.
+Open the waveform status item, or use your chosen global shortcut to Start/Stop without opening the menu.  
 Use Start, Stop, Copy Again, or Quit in the menu as before.
 
-The built-in shortcut is a temporary development default. Shortcut customization UI is not shipped yet; see [`docs/GLOBAL_DICTATION_SHORTCUT.md`](docs/GLOBAL_DICTATION_SHORTCUT.md).
+The temporary default shortcut is **⌃⇧D** until you change it in onboarding. See [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md) and [`docs/GLOBAL_DICTATION_SHORTCUT.md`](docs/GLOBAL_DICTATION_SHORTCUT.md).
 
 Parakeet is the default engine in **Debug and Release**. No backend launch argument is required.
 
 | Launch argument | Effect |
 |-----------------|--------|
-| *(none)* | Parakeet batch dictation + microphone. Setup appears when the model, mic, or Accessibility is not ready. |
-| `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup. |
+| *(none)* | Parakeet batch dictation + microphone. Setup appears when the model, mic, Accessibility, or shortcut confirmation is not ready. |
+| `--mock-transcription` | Debug only. Fake transcript. No microphone. Disables automatic setup (unless combined with `--simulate-onboarding`). |
 | `--apple-speech` | Debug only. Apple Speech comparison backend. Disables Parakeet setup. |
 | `--parakeet-fixture` | Debug only. Run the committed WAV through the app path (no mic). Disables automatic setup. |
 | `--parakeet-transcription` | Deprecated no-op. Parakeet is already the default; logged once. |
 | `--debug-window` | Debug only. Opens the Timbre Debug window. |
 | `--disable-setup` | Debug only. Disables the automatic first-run setup window. |
 | `--disable-model-prewarm` | Debug only. Disables background model prewarming (Start still loads via `ensureLoaded`). |
+| `--simulate-onboarding` | Debug only. Isolated fake onboarding (no real download, permissions, hotkey, or paste). See [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md). |
 
 Release builds ignore all of the DEBUG-only flags above.
 
@@ -106,9 +107,9 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 # Launch the Release .app from DerivedData Build/Products/Release/Timbre.app
 ```
 
-Confirm: setup appears; microphone then text insertion are requested before download; Start/Stop inserts into the focused app and keeps the transcript on the clipboard; DEBUG flags passed to the Release binary do not change backend or bypass setup.
+Confirm: setup appears; choose shortcut → microphone → text insertion before download; Start/Stop inserts into the focused app and keeps the transcript on the clipboard; DEBUG flags passed to the Release binary do not change backend or bypass setup.
 
-Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md), [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md), and [`docs/FOCUSED_APP_TEXT_INSERTION.md`](docs/FOCUSED_APP_TEXT_INSERTION.md).
+Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md), [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md), [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md), and [`docs/FOCUSED_APP_TEXT_INSERTION.md`](docs/FOCUSED_APP_TEXT_INSERTION.md).
 
 ### Smoke CLI
 

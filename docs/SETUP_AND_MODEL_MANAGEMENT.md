@@ -72,18 +72,19 @@ When setup is enabled and the model is not installed, still downloading, the mic
 `applicationDidBecomeActive` refreshes cache, microphone, and Accessibility trust so revoke/re-grant and deleted caches update the menu while Timbre stays open.
 
 ```text
-Welcome → Microphone → Text Insertion → Preparing → Ready
+Welcome → Shortcut → Microphone → Text Insertion → Preparing → Ready
 ```
 
-1. Mic permission is requested **before** Accessibility and before any download.
-2. Text insertion (Accessibility) is resolved **before** the ~500 MB model download.
-3. If Accessibility is not trusted, Timbre does **not** begin a new model download.
-4. Existing users with the model already installed are routed to Text Insertion only (no redownload).
-5. After both permissions are trusted, install starts automatically (no second Download button).
-6. Progress UI shows a determinate bar mapped from FluidAudio callbacks (monotonic overall fraction), percent, and an ETA when enough progress exists.
-7. Closing the window does not cancel preparation; the menu-bar app keeps running.
-8. Quit ends the process; the next launch re-probes the **cache**, not a stale Boolean.
-9. Prefs alone never prove the model is installed or that Accessibility is trusted.
+1. Shortcut confirmation happens **before** permission prompts and before any download.
+2. Mic permission is requested **before** Accessibility and before any download.
+3. Text insertion (Accessibility) is resolved **before** the ~500 MB model download.
+4. If Accessibility is not trusted, Timbre does **not** begin a new model download.
+5. Existing users with the model already installed skip redownload; they may still see shortcut confirmation or permission recovery.
+6. After shortcut confirmation and both permissions are trusted, install starts automatically (no second Download button).
+7. Progress UI shows a determinate bar mapped from FluidAudio callbacks (monotonic overall fraction), percent, and an ETA when enough progress exists.
+8. Closing the window does not cancel preparation; the menu-bar app keeps running.
+9. Quit ends the process; the next launch re-probes the **cache**, not a stale Boolean.
+10. Prefs alone never prove the model is installed or that Accessibility is trusted.
 
 ### Setup readiness vs clipboard fallback
 
@@ -94,11 +95,13 @@ Missing Accessibility blocks normal production Start (setup recovery). Clipboard
 | Key | Purpose |
 |-----|---------|
 | `timbre.hasCompletedSetupWelcome` | Welcome was continued |
+| `timbre.hasCompletedShortcutOnboarding` | User confirmed the shortcut onboarding step |
 | `timbre.hasDismissedSetupReady` | User tapped Done on Ready |
 | `timbre.hasOfferedAccessibilityPrompt` | UX only: Timbre already offered the Accessibility prompt |
 
 Model availability: `AsrModels.modelsExist` / successful verify via FluidAudio.
 Accessibility readiness: live `AXIsProcessTrusted` only.
+Assigned shortcut: KeyboardShortcuts storage for `.toggleDictation` (separate from confirmation).
 
 ### Cache
 
@@ -131,7 +134,7 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 # Launch Build/Products/Release/Timbre.app with no arguments
 ```
 
-Walk: setup appears → grant mic → Allow Text Insertion → prepare → optionally close window → Ready → Done → Start/Stop dictation → text inserted (and on clipboard).
+Walk: setup appears → choose shortcut → grant mic → Allow Text Insertion → prepare → optionally close window → Ready → Done → Start/Stop dictation → text inserted (and on clipboard).
 Pass DEBUG-only flags to the Release binary and confirm they do not change the backend or bypass setup.
 
 ## DEBUG setup bypass
@@ -141,10 +144,14 @@ Timbre.app/Contents/MacOS/Timbre --disable-setup
 Timbre.app/Contents/MacOS/Timbre --mock-transcription --debug-window
 Timbre.app/Contents/MacOS/Timbre --apple-speech --debug-window
 Timbre.app/Contents/MacOS/Timbre --parakeet-fixture --debug-window
+Timbre.app/Contents/MacOS/Timbre --simulate-onboarding --simulate-onboarding-duration 2
 ```
+
+See [`ONBOARDING_UX.md`](ONBOARDING_UX.md) for simulated onboarding isolation rules.
 
 ## Related
 
+- [`ONBOARDING_UX.md`](ONBOARDING_UX.md) — onboarding window, shortcut confirmation, simulation
 - [`PARAKEET_MICROPHONE_DICTATION.md`](PARAKEET_MICROPHONE_DICTATION.md) — production mic path uses `ensureLoaded()`
 - [`PARAKEET_SMOKE_TEST.md`](PARAKEET_SMOKE_TEST.md) — file smoke CLI (independent of the app manager)
 - [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md) — Accessibility + insertion

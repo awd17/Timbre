@@ -6,9 +6,9 @@ Developer notes for Timbre’s system-wide Start/Stop hotkey.
 
 - Toggle hotkey is wired through `DictationShortcutCoordinator` into the existing `AssistantController` workflow.
 - Temporary pre-release default: **Control+Shift+D** (`⌃⇧D`).
+- First-run onboarding presents `KeyboardShortcuts.Recorder` for `.toggleDictation` so the user can confirm or replace the shortcut.
+- Confirmation is tracked separately as `timbre.hasCompletedShortcutOnboarding` (see [`ONBOARDING_UX.md`](ONBOARDING_UX.md)).
 - Completed transcripts are copied to the clipboard and inserted into the captured target when safe (see [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md)).
-- Shortcut customization UI is **not** implemented.
-- Before the first public release, the onboarding-polish PR **must** add `KeyboardShortcuts.Recorder` so the user can confirm or choose the shortcut.
 
 ## Temporary default
 
@@ -41,6 +41,26 @@ KeyboardShortcuts persists the value in `UserDefaults` under `KeyboardShortcuts_
 KeyboardShortcuts.reset(.toggleDictation)
 ```
 
+Or:
+
+```bash
+defaults delete com.augustdrakton.Timbre KeyboardShortcuts_toggleDictation
+```
+
+## Onboarding Recorder
+
+Onboarding embeds:
+
+```swift
+KeyboardShortcuts.Recorder(for: .toggleDictation) { newShortcut in
+    // Updates Continue enablement via ShortcutOnboardingProviding
+}
+```
+
+Continue is disabled when the assigned shortcut is nil. Ready and menu hints read the same live display string.
+
+DEBUG `--simulate-onboarding` uses a deterministic simulated shortcut control by default so UI tests do not mutate the developer’s real chord. Optional `--simulate-onboarding-real-recorder` enables the real Recorder for interactive QA only.
+
 ## Toggle behavior
 
 ```text
@@ -69,8 +89,8 @@ Service APIs match the package: `onKeyUp` + `removeHandler` + `isEnabled(for:)` 
 ## Conflicts
 
 - Manual verification confirms the temporary default fires globally when no other app owns the chord.
-- Future `KeyboardShortcuts.Recorder` can warn about system and menu conflicts during onboarding.
-- This PR does not promise detecting when another application has registered the same global combination.
+- `KeyboardShortcuts.Recorder` can warn about system and menu conflicts during onboarding.
+- Timbre does not promise detecting when another application has registered the same global combination.
 
 ## Testing
 
@@ -85,9 +105,9 @@ Uses `FakeGlobalShortcutService` — no real system hotkeys.
 ### Manual (required for global behavior)
 
 1. Build Debug and Release.
-2. Launch Timbre; complete setup if needed.
-3. Focus TextEdit; press ⌃⇧D → Preparing/Listening without opening the menu.
-4. Speak; press ⌃⇧D again → Processing → text inserted into TextEdit (and still on clipboard).
+2. Launch Timbre; complete setup if needed (including shortcut confirmation).
+3. Focus TextEdit; press the chosen shortcut → Preparing/Listening without opening the menu.
+4. Speak; press the shortcut again → Processing → text inserted into TextEdit (and still on clipboard).
 5. Confirm clipboard still holds the transcript; Copy Again does not paste again.
 6. Start a second session via the hotkey (model reuse).
 7. Mash during Processing → no overlapping session.
@@ -97,9 +117,10 @@ Uses `FakeGlobalShortcutService` — no real system hotkeys.
 11. Menu Start/Stop still behave the same (menu path may briefly reactivate the captured target).
 12. DEBUG `--mock-transcription` toggle works without posting real paste events.
 13. `--parakeet-fixture` skips global shortcut registration.
+14. `--simulate-onboarding` skips global shortcut registration.
 
 ## Related
 
+- Onboarding UX: [`ONBOARDING_UX.md`](ONBOARDING_UX.md).
 - Focused-app insertion: [`FOCUSED_APP_TEXT_INSERTION.md`](FOCUSED_APP_TEXT_INSERTION.md).
 - Model prewarming: [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md).
-- Later: onboarding polish with `KeyboardShortcuts.Recorder`.

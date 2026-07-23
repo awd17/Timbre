@@ -53,6 +53,24 @@ final class TimbreSetupFeatureTests: XCTestCase {
             )
         )
     }
+
+    func testSimulateOnboardingForcesSetupOnEvenWithMockFlag() {
+        XCTAssertTrue(
+            TimbreSetupFeature.isEnabled(
+                arguments: ["--simulate-onboarding", "--mock-transcription"],
+                isDebug: true
+            )
+        )
+    }
+
+    func testSimulateOnboardingRejectedWithDisableSetup() {
+        XCTAssertFalse(
+            TimbreSetupFeature.isEnabled(
+                arguments: ["--simulate-onboarding", "--disable-setup"],
+                isDebug: true
+            )
+        )
+    }
 }
 
 @MainActor
@@ -75,14 +93,39 @@ final class SetupCoordinatorTests: XCTestCase {
         super.tearDown()
     }
 
+    private func makeCoordinator(
+        model: FakeParakeetModelManager,
+        microphone: FakeMicrophonePermission? = nil,
+        accessibility: FakeAccessibilityPermission? = nil,
+        shortcut: FakeShortcutOnboarding? = nil,
+        featureEnabled: Bool = true
+    ) -> SetupCoordinator {
+        SetupCoordinator(
+            modelManager: model,
+            microphone: microphone ?? FakeMicrophonePermission(status: .granted),
+            accessibility: accessibility ?? FakeAccessibilityPermission(trustState: .trusted),
+            defaults: defaults,
+            shortcutOnboarding: shortcut ?? FakeShortcutOnboarding(),
+            featureEnabled: featureEnabled
+        )
+    }
+
+    private func confirmShortcut(_ coordinator: SetupCoordinator) {
+        coordinator.continueFromShortcut()
+    }
+
+    private func advanceThroughWelcomeAndShortcut(_ coordinator: SetupCoordinator) {
+        coordinator.continueFromWelcome()
+        XCTAssertEqual(coordinator.step, .shortcut)
+        confirmShortcut(coordinator)
+    }
+
     func testFeatureOffNeverAutoPresents() {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission()
-        let coordinator = SetupCoordinator(
-            modelManager: model,
+        let coordinator = makeCoordinator(
+            model: model,
             microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
             featureEnabled: false
         )
         XCTAssertFalse(coordinator.shouldAutoPresent)
@@ -93,31 +136,98 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testInitializationRefreshesAvailabilityOnceWhenEnabled() {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        _ = SetupCoordinator(
-            modelManager: model,
-            microphone: FakeMicrophonePermission(),
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        _ = makeCoordinator(model: model, microphone: FakeMicrophonePermission())
 
         XCTAssertEqual(model.refreshCallCount, 1)
     }
 
-    func testMicGrantedStartsInstall() async {
+    func testFreshInstallBeginsAtWelcome() {
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .notInstalled),
+            microphone: FakeMicrophonePermission(status: .undetermined)
+        )
+        XCTAssertEqual(coordinator.step, .welcome)
+    }
+
+    func testDefaultShortcutWithoutConfirmationShowsShortcutStep() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        let shortcut = FakeShortcutOnboarding(hasAssignedShortcut: true)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .installed),
+            shortcut: shortcut
+        )
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertFalse(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
+    }
+
+    func testShortcutContinueRequiresAssignedShortcut() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        let shortcut = FakeShortcutOnboarding(hasAssignedShortcut: false)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .notInstalled),
+            shortcut: shortcut
+        )
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertFalse(coordinator.canContinueFromShortcut)
+        coordinator.continueFromShortcut()
+        XCTAssertFalse(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
+        XCTAssertEqual(coordinator.step, .shortcut)
+    }
+
+    func testRecorderChangeUpdatesContinueImmediately() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        let shortcut = FakeShortcutOnboarding(hasAssignedShortcut: false)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .notInstalled),
+            shortcut: shortcut
+        )
+        XCTAssertFalse(coordinator.canContinueFromShortcut)
+
+        coordinator.shortcutRecorderDidChange(isAssigned: true, displayString: "⌃⇧D")
+        XCTAssertTrue(coordinator.canContinueFromShortcut)
+        XCTAssertEqual(shortcut.applyCallCount, 1)
+
+        coordinator.shortcutRecorderDidChange(isAssigned: false, displayString: nil)
+        XCTAssertFalse(coordinator.canContinueFromShortcut)
+    }
+
+    func testShortcutConfirmationPersistsAndAdvances() async {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        model.suspendsInstallation = true
+        let coordinator = makeCoordinator(model: model)
+        advanceThroughWelcomeAndShortcut(coordinator)
+        await model.waitForInstallStart()
+
+        XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
+        XCTAssertEqual(coordinator.step, .preparing)
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
+    }
+
+    func testClearingShortcutLaterRecoversWithoutRedownload() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let shortcut = FakeShortcutOnboarding(hasAssignedShortcut: true)
+        let coordinator = makeCoordinator(model: model, shortcut: shortcut)
+        XCTAssertTrue(coordinator.allowsDictation)
+
+        coordinator.shortcutRecorderDidChange(isAssigned: false, displayString: nil)
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
+    }
+
+    func testMicGrantedStartsInstallAfterShortcut() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .granted
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await model.waitForInstallStart()
         XCTAssertEqual(coordinator.step, .preparing)
         XCTAssertEqual(model.ensureInstalledCallCount, 1)
@@ -132,15 +242,9 @@ final class SetupCoordinatorTests: XCTestCase {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .denied
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .microphoneDenied }
 
         XCTAssertEqual(coordinator.step, .microphoneDenied)
@@ -150,15 +254,9 @@ final class SetupCoordinatorTests: XCTestCase {
     func testDeniedWaitsForExplicitRetry() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission(status: .denied)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .microphoneDenied }
 
         XCTAssertEqual(mic.requestCallCount, 0)
@@ -174,15 +272,9 @@ final class SetupCoordinatorTests: XCTestCase {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .denied
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .microphoneDenied }
         coordinator.markWindowVisible(false)
         coordinator.presentRequestedFromMenu()
@@ -195,18 +287,10 @@ final class SetupCoordinatorTests: XCTestCase {
     func testSingleFlightInstallFromCoordinator() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await model.waitForInstallStart()
-        // A second request while preparing must not start another coordinator effect.
         coordinator.retryAfterFailure()
 
         XCTAssertEqual(model.ensureInstalledCallCount, 1)
@@ -227,16 +311,9 @@ final class SetupCoordinatorTests: XCTestCase {
                 throw TranscriptionError.recognitionFailed("boom")
             }
         }
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .failed }
         XCTAssertEqual(coordinator.step, .failed)
 
@@ -246,33 +323,30 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.state, .installed)
     }
 
-    func testInstalledCacheSkipsWelcomeDownloadPitch() {
+    func testInstalledCacheWithoutShortcutConfirmationShowsShortcut() {
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testExistingUserShortcutOnlyThenReady() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let coordinator = makeCoordinator(model: model)
+        XCTAssertEqual(coordinator.step, .shortcut)
+        confirmShortcut(coordinator)
         XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertTrue(coordinator.shouldAutoPresent)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
     func testPrewarmInvalidationReconcilesSetupAndRepairsCache() async {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         let model = FakeParakeetModelManager(initialState: .installed)
         model.retainLoadBehavior = .missing
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: FakeMicrophonePermission(status: .granted),
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
         let prewarm = ParakeetPrewarmCoordinator(
             modelManager: model,
             isEligible: { coordinator.allowsDictation },
@@ -291,29 +365,18 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testDismissedReadyDoesNotAutoPresent() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
         XCTAssertFalse(coordinator.shouldAutoPresent)
         XCTAssertNil(coordinator.menuActionTitle)
     }
 
     func testReactivationWhileModelLoadsPreservesCompletedSetup() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: FakeMicrophonePermission(status: .granted),
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
 
         model.setState(.loading)
         coordinator.applicationDidBecomeActive()
@@ -328,16 +391,10 @@ final class SetupCoordinatorTests: XCTestCase {
     func testMissingModelOverridesStaleDismissedPref() async {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
         await model.waitForInstallStart()
         XCTAssertFalse(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
         XCTAssertTrue(coordinator.shouldAutoPresent)
@@ -349,14 +406,11 @@ final class SetupCoordinatorTests: XCTestCase {
     }
 
     func testMenuStatusWhileDownloading() {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .downloading)
-        let mic = FakeMicrophonePermission()
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
+        let coordinator = makeCoordinator(
+            model: model,
+            microphone: FakeMicrophonePermission()
         )
         XCTAssertEqual(coordinator.menuActionTitle, "Getting Ready…")
         XCTAssertEqual(coordinator.menuStatusText, "Getting ready…")
@@ -364,33 +418,21 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.allowsDictation)
     }
 
-    func testInstalledAllowsDictationOnlyWhenMicrophoneAndAccessibilityGranted() {
+    func testInstalledAllowsDictationOnlyWhenShortcutConfirmedAndPermissionsGranted() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
         XCTAssertTrue(coordinator.allowsDictation)
         XCTAssertFalse(coordinator.blocksDictationUI)
     }
 
     func testInstalledBlocksDictationWhenAccessibilityNotTrusted() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
         let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertFalse(coordinator.allowsDictation)
         XCTAssertTrue(coordinator.blocksDictationUI)
         XCTAssertEqual(coordinator.step, .textInsertion)
@@ -404,15 +446,13 @@ final class SetupCoordinatorTests: XCTestCase {
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .granted
         let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
+        let coordinator = makeCoordinator(
+            model: model,
             microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
+            accessibility: accessibility
         )
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .textInsertion }
         XCTAssertEqual(coordinator.step, .textInsertion)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
@@ -428,18 +468,11 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testAccessibilityDeniedDoesNotStartDownload() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
-        let mic = FakeMicrophonePermission(status: .granted)
         let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
         accessibility.trustAfterRequest = .notTrusted
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await waitUntil { coordinator.step == .textInsertion || coordinator.step == .textInsertionDenied }
         coordinator.requestTextInsertionAccess()
         await waitUntil { coordinator.step == .textInsertionDenied }
@@ -449,35 +482,23 @@ final class SetupCoordinatorTests: XCTestCase {
     }
 
     func testExistingInstalledModelRoutesToTextInsertionWithoutRedownload() {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
         )
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertEqual(coordinator.step, .textInsertionDenied)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
     func testAccessibilityGrantRestoresReadyWithoutRedownload() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
         let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertFalse(coordinator.allowsDictation)
 
         accessibility.trustState = .trusted
@@ -489,16 +510,10 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testAccessibilityRevokeUpdatesReadinessWithoutClearingInstall() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
         let accessibility = FakeAccessibilityPermission(trustState: .trusted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertTrue(coordinator.allowsDictation)
 
         accessibility.trustState = .notTrusted
@@ -511,33 +526,23 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testOfferedPromptDoesNotProveReadiness() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
         )
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: FakeMicrophonePermission(status: .granted),
-            accessibility: accessibility,
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertFalse(coordinator.allowsDictation)
         XCTAssertEqual(coordinator.step, .textInsertionDenied)
     }
 
     func testInstalledBlocksDictationWhenMicrophoneDenied() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
         let mic = FakeMicrophonePermission(status: .denied)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
         XCTAssertFalse(coordinator.allowsDictation)
         XCTAssertTrue(coordinator.blocksDictationUI)
         XCTAssertEqual(coordinator.menuActionTitle, "Finish Setup…")
@@ -547,15 +552,10 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testMicrophoneRevokeAndRegrantUpdatesReadinessWithoutRelaunch() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
         let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
         XCTAssertTrue(coordinator.allowsDictation)
 
         mic.status = .denied
@@ -572,15 +572,9 @@ final class SetupCoordinatorTests: XCTestCase {
     }
 
     func testAcknowledgeReadyPersistsDismissal() {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
         coordinator.acknowledgeReadyAndDismiss()
         XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
         XCTAssertFalse(coordinator.shouldAutoPresent)
@@ -589,32 +583,21 @@ final class SetupCoordinatorTests: XCTestCase {
     func testConstructionDoesNotStartInstallOrMicRequest() {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         let mic = FakeMicrophonePermission(status: .undetermined)
-        _ = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        _ = makeCoordinator(model: model, microphone: mic)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
         XCTAssertEqual(mic.requestCallCount, 0)
         XCTAssertEqual(model.refreshCallCount, 1)
     }
 
-    func testReturningUserConstructionRequestsMicAndContinuesInstall() async {
+    func testReturningUserConstructionRequestsMicAfterShortcutConfirmed() async {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .granted
 
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model, microphone: mic)
 
         await model.waitForInstallStart()
         XCTAssertEqual(mic.requestCallCount, 1)
@@ -628,16 +611,9 @@ final class SetupCoordinatorTests: XCTestCase {
     func testWindowCloseDoesNotCancelInstall() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
         model.suspendsInstallation = true
-        let mic = FakeMicrophonePermission(status: .granted)
-        let coordinator = SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: FakeAccessibilityPermission(trustState: .trusted),
-            defaults: defaults,
-            featureEnabled: true
-        )
+        let coordinator = makeCoordinator(model: model)
 
-        coordinator.continueFromWelcome()
+        advanceThroughWelcomeAndShortcut(coordinator)
         await model.waitForInstallStart()
         XCTAssertEqual(coordinator.step, .preparing)
         coordinator.markWindowVisible(false)
@@ -645,6 +621,20 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(model.state, .installed)
         XCTAssertEqual(coordinator.step, .ready)
+    }
+
+    func testReadyDisplaysLiveShortcutString() {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let shortcut = FakeShortcutOnboarding(
+            hasAssignedShortcut: true,
+            displayString: "⌃⌥D"
+        )
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .installed),
+            shortcut: shortcut
+        )
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertEqual(coordinator.shortcutDisplayString, "⌃⌥D")
     }
 }
 
