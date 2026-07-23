@@ -54,19 +54,19 @@ final class TimbreSetupFeatureTests: XCTestCase {
         )
     }
 
-    func testSimulateOnboardingForcesSetupOnEvenWithMockFlag() {
+    func testIntegrationRuntimeForcesSetupOnEvenWithMockFlag() {
         XCTAssertTrue(
             TimbreSetupFeature.isEnabled(
-                arguments: ["--simulate-onboarding", "--mock-transcription"],
+                arguments: ["--integration-test", "--mock-transcription"],
                 isDebug: true
             )
         )
     }
 
-    func testSimulateOnboardingRejectedWithDisableSetup() {
-        XCTAssertFalse(
+    func testIntegrationRuntimeStillForcesSetupWithDisableFlag() {
+        XCTAssertTrue(
             TimbreSetupFeature.isEnabled(
-                arguments: ["--simulate-onboarding", "--disable-setup"],
+                arguments: ["--integration-test", "--disable-setup"],
                 isDebug: true
             )
         )
@@ -443,6 +443,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testAccessibilityBeforeDownloadWhenMicGranted() async {
         let model = FakeParakeetModelManager(initialState: .notInstalled)
+        model.suspendsInstallation = true
         let mic = FakeMicrophonePermission(status: .undetermined)
         mic.statusAfterRequest = .granted
         let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
@@ -464,6 +465,40 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.ensureInstalledCallCount, 1)
         model.resumeInstallation()
         await waitUntil { coordinator.step == .ready }
+    }
+
+    func testContinueInBackgroundSuppressesReadyRelaunchWithoutCancellingInstall() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .downloading)
+        let coordinator = makeCoordinator(model: model)
+
+        XCTAssertTrue(coordinator.shouldAutoPresent)
+        coordinator.continuePreparationInBackground()
+        XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
+
+        model.setState(.installed)
+        coordinator.modelPreparationDidChange()
+
+        XCTAssertTrue(coordinator.allowsDictation)
+        XCTAssertFalse(coordinator.shouldAutoPresent)
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    func testBackgroundReadySuppressionClearsWhenInstallFails() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .downloading)
+        let coordinator = makeCoordinator(model: model)
+
+        coordinator.continuePreparationInBackground()
+        model.setState(.failed(message: "failed"))
+        coordinator.modelPreparationDidChange()
+
+        XCTAssertFalse(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
+        XCTAssertTrue(coordinator.shouldAutoPresent)
+        XCTAssertEqual(coordinator.step, .failed)
     }
 
     func testAccessibilityDeniedDoesNotStartDownload() async {

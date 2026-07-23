@@ -12,8 +12,8 @@ extension KeyboardShortcuts.Name {
     )
 
     #if DEBUG
-    /// Isolated storage used by simulated onboarding so UI tests never change the real shortcut.
-    static let simulatedOnboarding = Self("simulatedOnboarding")
+    /// Isolated storage used by the full-app integration test.
+    static let integrationTestToggleDictation = Self("integrationTestToggleDictation")
     #endif
 }
 
@@ -27,7 +27,12 @@ enum DictationShortcutName {
 
     @MainActor
     static var displayString: String {
-        if let shortcut = KeyboardShortcuts.getShortcut(for: .toggleDictation) {
+        displayString(for: .toggleDictation)
+    }
+
+    @MainActor
+    static func displayString(for name: KeyboardShortcuts.Name) -> String {
+        if let shortcut = KeyboardShortcuts.getShortcut(for: name) {
             return shortcut.description
         }
         return temporaryDefaultDisplayString

@@ -1,4 +1,5 @@
 import AppKit
+import KeyboardShortcuts
 import SwiftUI
 
 /// Presents a single first-run setup window. Closing does not cancel model preparation.
@@ -7,17 +8,16 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
     private let coordinator: SetupCoordinator
     private var window: NSWindow?
     private let shouldRestoreAccessory: () -> Bool
-    /// When true, shortcut step uses KeyboardShortcuts.Recorder; otherwise a simulated control.
-    private let usesRealShortcutRecorder: Bool
+    private let shortcutRecorderName: KeyboardShortcuts.Name
 
     init(
         coordinator: SetupCoordinator,
         shouldRestoreAccessory: @escaping () -> Bool,
-        usesRealShortcutRecorder: Bool = true
+        shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     ) {
         self.coordinator = coordinator
         self.shouldRestoreAccessory = shouldRestoreAccessory
-        self.usesRealShortcutRecorder = usesRealShortcutRecorder
+        self.shortcutRecorderName = shortcutRecorderName
         super.init()
     }
 
@@ -58,8 +58,9 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(
             rootView: SetupFlowView(
                 coordinator: coordinator,
-                usesRealShortcutRecorder: usesRealShortcutRecorder,
+                shortcutRecorderName: shortcutRecorderName,
                 onContinueInBackground: { [weak self] in
+                    self?.coordinator.continuePreparationInBackground()
                     self?.window?.close()
                 },
                 onDone: { [weak self] in

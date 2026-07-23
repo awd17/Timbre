@@ -47,29 +47,26 @@ Clearing the shortcut later returns the user to shortcut recovery on the next re
 
 ## Closing during download
 
-**Continue in Background** (or the window close button) dismisses the window only. Shared `ParakeetModelManaging.ensureInstalled()` keeps running. Reopening shows live progress. Quitting the app ends in-process work; the next launch re-probes the on-disk cache.
+**Continue in Background** dismisses the window and suppresses the automatic
+Ready presentation after a successful install. Shared
+`ParakeetModelManaging.ensureInstalled()` keeps running, and reopening shows
+live progress without starting another install. A failure clears the
+suppression so recovery is presented. The ordinary close button also leaves
+preparation running, but does not opt out of the later Ready presentation.
+Quitting ends in-process work; the next launch re-probes the on-disk cache.
 
-## Simulated onboarding (DEBUG)
+## Automated full-app onboarding (DEBUG)
 
 ```bash
-Timbre.app/Contents/MacOS/Timbre \
-  --simulate-onboarding \
-  --simulate-onboarding-duration 6
+scripts/run-full-integration-test.sh
 ```
 
-| Argument | Effect |
-|----------|--------|
-| `--simulate-onboarding` | Forces setup on; fake mic/Accessibility/model; isolated prefs and custom hotkey capture; disables global hotkey registration, real prewarm, paste insertion, System Settings, FluidAudio |
-| `--simulate-onboarding-duration <seconds>` | Fake download length (default 6) |
-| `--simulate-onboarding-failure` | First simulated install fails; retry can succeed |
-| `--simulate-onboarding-step <name>` | Jump to a seeded state (`welcome`, `shortcut`, `shortcut-empty`, `microphone`, `microphone-denied`, `accessibility`, `accessibility-denied`, `preparing`, `ready`, `failed`) |
-| `--simulate-onboarding-real-recorder` | Uses the production `.toggleDictation` recorder instead of the isolated simulated recorder (can mutate the developer’s real shortcut). Automated UI tests do **not** use this. |
-
-Incompatible with `--disable-setup`, `--parakeet-fixture`, and `--apple-speech`. Compatible with `--mock-transcription` in the sense that simulation already uses mock transcription internally.
-
-Close/reopen keeps simulated progress because the fake model manager is owned by the app delegate, not the SwiftUI view.
-
-Release builds ignore all simulation flags.
+The single UI lifecycle runs both foreground and background onboarding,
+records an isolated real Carbon shortcut, covers permission recovery and
+install failure/retry, and continues through menu dictation, relaunch,
+delivery safety, and Quit. It uses persistent isolated profiles and a fake
+model that never touches FluidAudio or the network. See
+[`FULL_APPLICATION_INTEGRATION_TEST.md`](FULL_APPLICATION_INTEGRATION_TEST.md).
 
 ## Real reset (not for normal UI iteration)
 
@@ -86,7 +83,8 @@ tccutil reset Accessibility com.augustdrakton.Timbre
 rm -rf "$HOME/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2"
 ```
 
-Prefer `--simulate-onboarding` for UI iteration. Delete the model cache only for true end-to-end download testing.
+Use the full-app integration test for repeatable onboarding coverage. Delete
+the model cache only for true end-to-end download testing.
 
 ## Existing-user migration
 

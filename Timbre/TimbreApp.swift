@@ -8,16 +8,10 @@ struct TimbreApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDictationView(
-                controller: appDelegate.controller,
-                setupCoordinator: appDelegate.setupCoordinator,
-                shortcutCoordinator: appDelegate.shortcutCoordinator,
-                onOpenSetup: {
-                    appDelegate.presentSetupWindow()
-                }
-            )
+            appDelegate.menuContent
         } label: {
             Label("Timbre", systemImage: "waveform")
+                .accessibilityIdentifier("timbreStatusItem")
         }
         .menuBarExtraStyle(.window)
     }
@@ -26,151 +20,162 @@ struct TimbreApp: App {
 @MainActor
 final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let controller: AssistantController
-    let modelManager: ParakeetModelManager
+    let modelManager: any ParakeetModelManaging
     let setupCoordinator: SetupCoordinator?
     let prewarmCoordinator: ParakeetPrewarmCoordinator?
     let shortcutCoordinator: DictationShortcutCoordinator
 
     private var debugWindow: NSWindow?
     private var setupWindowController: SetupWindowController?
-    private let usesRealShortcutRecorder: Bool
-    private let isSimulatedOnboarding: Bool
+    private let shortcutRecorderName: KeyboardShortcuts.Name
+    #if DEBUG
+    private let integrationRuntime: IntegrationTestRuntime?
+    #endif
+
+    var menuContent: MenuBarDictationView {
+        MenuBarDictationView(
+            controller: controller,
+            setupCoordinator: setupCoordinator,
+            shortcutCoordinator: shortcutCoordinator,
+            onOpenSetup: { [weak self] in
+                self?.presentSetupWindow()
+            }
+        )
+    }
 
     override init() {
-        let arguments = ProcessInfo.processInfo.arguments
-#if DEBUG
-        let simulating = SimulatedOnboarding.isEnabled(arguments: arguments)
-        let simConfig = SimulatedOnboarding.configuration(arguments: arguments)
-#else
-        let simulating = false
-#endif
-        isSimulatedOnboarding = simulating
-#if DEBUG
-        usesRealShortcutRecorder = simulating ? simConfig.useRealRecorder : true
-#else
-        usesRealShortcutRecorder = true
-#endif
-
-        let modelManager = ParakeetModelManager()
-        self.modelManager = modelManager
-
-        let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments)
-
+        let processInfo = ProcessInfo.processInfo
+        let arguments = processInfo.arguments
         let targetProvider = FrontmostApplicationTracker()
-        let liveAccessibility = AccessibilityPermissionService()
 
-        let createdSetupCoordinator: SetupCoordinator?
-        if setupEnabled {
-#if DEBUG
-            if simulating {
-                TimbreLog.line(
-                    "Timbre onboarding: SIMULATED mode duration=\(simConfig.durationSeconds)s failOnce=\(simConfig.failOnce) realRecorder=\(simConfig.useRealRecorder)"
-                )
-                let preferences = Self.makeSimulatedPreferences(config: simConfig)
-                if !simConfig.useRealRecorder {
-                    let simulatedShortcut: KeyboardShortcuts.Shortcut? =
-                        simConfig.initialStep == "shortcut-empty"
-                        ? nil
-                        : DictationShortcutName.recommendedShortcut
-                    KeyboardShortcuts.setShortcut(
-                        simulatedShortcut,
-                        for: .simulatedOnboarding
-                    )
-                }
-                let shortcut: any ShortcutOnboardingProviding = simConfig.useRealRecorder
-                    ? KeyboardShortcutsOnboardingAdapter()
-                    : SimulatedShortcutOnboarding(
-                        hasAssignedShortcut: simConfig.initialStep != "shortcut-empty",
-                        displayString: DictationShortcutName.temporaryDefaultDisplayString
-                    )
-                let (mic, ax, model) = Self.makeSimulatedPermissionAndModel(config: simConfig)
-                createdSetupCoordinator = SetupCoordinator(
-                    modelManager: model,
-                    microphone: mic,
-                    accessibility: ax,
-                    preferences: preferences,
-                    shortcutOnboarding: shortcut,
-                    featureEnabled: true
-                )
-            } else {
-                createdSetupCoordinator = SetupCoordinator(
-                    modelManager: modelManager,
+        let selectedModelManager: any ParakeetModelManaging
+        let selectedSetupCoordinator: SetupCoordinator?
+        let selectedTranscription: any TranscriptionServicing
+        let selectedDelivery: any TranscriptDeliveryServicing
+        let selectedShortcutService: any GlobalShortcutServicing
+        let selectedShortcutName: KeyboardShortcuts.Name
+        let shouldConfigurePrewarm: Bool
+        let isProductionBackendForPrewarm: Bool
+
+        #if DEBUG
+        let integrationConfiguration = IntegrationTestConfiguration.resolve(
+            arguments: arguments,
+            environment: processInfo.environment
+        )
+        let integrationRuntime = integrationConfiguration.map(IntegrationTestRuntime.init)
+        self.integrationRuntime = integrationRuntime
+        #endif
+
+        #if DEBUG
+        if let integrationRuntime {
+            TimbreLog.line(
+                "Timbre integration: profile=\(integrationRuntime.configuration.profile) scenario=\(integrationRuntime.configuration.scenario.rawValue)"
+            )
+            selectedModelManager = integrationRuntime.modelManager
+            selectedSetupCoordinator = SetupCoordinator(
+                modelManager: integrationRuntime.modelManager,
+                microphone: integrationRuntime.microphone,
+                accessibility: integrationRuntime.accessibility,
+                preferences: UserDefaultsOnboardingPreferences(
+                    defaults: integrationRuntime.defaults
+                ),
+                shortcutOnboarding: integrationRuntime.shortcutOnboarding,
+                featureEnabled: true
+            )
+            selectedTranscription = integrationRuntime.transcription
+            selectedDelivery = integrationRuntime.makeDelivery(targetProvider: targetProvider)
+            selectedShortcutService = integrationRuntime.shortcutService
+            selectedShortcutName = integrationRuntime.shortcutName
+            shouldConfigurePrewarm = true
+            isProductionBackendForPrewarm = true
+        } else {
+            let productionModelManager = ParakeetModelManager()
+            let liveAccessibility = AccessibilityPermissionService()
+            let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments)
+            selectedModelManager = productionModelManager
+            selectedSetupCoordinator = setupEnabled
+                ? SetupCoordinator(
+                    modelManager: productionModelManager,
                     microphone: MicrophonePermissionService(),
                     accessibility: liveAccessibility,
                     featureEnabled: true
                 )
-            }
-#else
-            createdSetupCoordinator = SetupCoordinator(
-                modelManager: modelManager,
-                microphone: MicrophonePermissionService(),
-                accessibility: liveAccessibility,
-                featureEnabled: true
+                : nil
+            selectedTranscription = Self.makeTranscriptionService(
+                modelManager: productionModelManager,
+                arguments: arguments
             )
-#endif
-        } else {
-            createdSetupCoordinator = nil
+            selectedDelivery = Self.makeTranscriptDelivery(
+                arguments: arguments,
+                targetProvider: targetProvider,
+                accessibility: liveAccessibility
+            )
+            selectedShortcutService = KeyboardShortcutsGlobalShortcutService()
+            selectedShortcutName = .toggleDictation
+            shouldConfigurePrewarm = selectedSetupCoordinator != nil
+            isProductionBackendForPrewarm = Self.isProductionParakeetBackend(
+                arguments: arguments
+            )
         }
-        setupCoordinator = createdSetupCoordinator
+        #else
+        let productionModelManager = ParakeetModelManager()
+        let liveAccessibility = AccessibilityPermissionService()
+        selectedModelManager = productionModelManager
+        selectedSetupCoordinator = SetupCoordinator(
+            modelManager: productionModelManager,
+            microphone: MicrophonePermissionService(),
+            accessibility: liveAccessibility,
+            featureEnabled: true
+        )
+        selectedTranscription = Self.makeTranscriptionService(
+            modelManager: productionModelManager,
+            arguments: arguments
+        )
+        selectedDelivery = FocusedApplicationTextOutputService(
+            accessibility: liveAccessibility,
+            targetProvider: targetProvider
+        )
+        selectedShortcutService = KeyboardShortcutsGlobalShortcutService()
+        selectedShortcutName = .toggleDictation
+        shouldConfigurePrewarm = true
+        isProductionBackendForPrewarm = true
+        #endif
 
-        if let createdSetupCoordinator, !simulating {
+        modelManager = selectedModelManager
+        setupCoordinator = selectedSetupCoordinator
+        shortcutRecorderName = selectedShortcutName
+        controller = AssistantController(
+            transcription: selectedTranscription,
+            delivery: selectedDelivery,
+            targetProvider: targetProvider
+        )
+        shortcutCoordinator = DictationShortcutCoordinator(
+            controller: controller,
+            setupCoordinator: selectedSetupCoordinator,
+            shortcutService: selectedShortcutService
+        )
+
+        if shouldConfigurePrewarm, let selectedSetupCoordinator {
             let prewarmCoordinator = ParakeetPrewarmCoordinator(
-                modelManager: modelManager,
-                isEligible: { [weak createdSetupCoordinator] in
-                    createdSetupCoordinator?.allowsDictation == true
+                modelManager: selectedModelManager,
+                isEligible: { [weak selectedSetupCoordinator] in
+                    selectedSetupCoordinator?.allowsDictation == true
                 },
-                isParakeetProductionBackend: Self.isProductionParakeetBackend(
-                    arguments: arguments
-                ),
+                isParakeetProductionBackend: isProductionBackendForPrewarm,
                 disablePrewarm: Self.shouldDisableModelPrewarm(arguments: arguments),
-                onModelStateChanged: { [weak createdSetupCoordinator] in
-                    createdSetupCoordinator?.modelPreparationDidChange()
+                onModelStateChanged: { [weak selectedSetupCoordinator] in
+                    selectedSetupCoordinator?.modelPreparationDidChange()
                 }
             )
             self.prewarmCoordinator = prewarmCoordinator
-            createdSetupCoordinator.onReadinessChanged = { [weak prewarmCoordinator] _ in
+            selectedSetupCoordinator.onReadinessChanged = { [weak prewarmCoordinator] _ in
                 prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
             }
         } else {
             prewarmCoordinator = nil
-            if simulating {
-                TimbreLog.line("Timbre onboarding: SIMULATED mode disables real model prewarming")
-            }
         }
 
-        let deliveryAccessibility: any AccessibilityPermissionProviding
-#if DEBUG
-        if simulating {
-            deliveryAccessibility = SimulatedAccessibilityPermission(trustState: .trusted)
-        } else {
-            deliveryAccessibility = liveAccessibility
-        }
-#else
-        deliveryAccessibility = liveAccessibility
-#endif
-
-        controller = AssistantController(
-            transcription: Self.makeTranscriptionService(
-                modelManager: modelManager,
-                arguments: arguments,
-                simulating: simulating
-            ),
-            delivery: Self.makeTranscriptDelivery(
-                arguments: arguments,
-                targetProvider: targetProvider,
-                accessibility: deliveryAccessibility,
-                simulating: simulating
-            ),
-            targetProvider: targetProvider
-        )
-
-        shortcutCoordinator = DictationShortcutCoordinator(
-            controller: controller,
-            setupCoordinator: setupCoordinator,
-            shortcutService: KeyboardShortcutsGlobalShortcutService()
-        )
         super.init()
-
         shortcutCoordinator.setPresentSetup { [weak self] in
             self?.presentSetupWindow()
         }
@@ -179,27 +184,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.applyBundledApplicationIcon()
         #if DEBUG
-        if Self.wantsDebugWindow {
+        if Self.wantsDebugWindow || integrationRuntime?.configuration.showsMenuHost == true {
             NSApp.setActivationPolicy(.regular)
         }
         #endif
         if setupCoordinator?.shouldAutoPresent == true {
             NSApp.setActivationPolicy(.regular)
         }
-    }
-
-    /// Explicitly applies the asset-catalog icon so Xcode and Launch Services do not
-    /// keep showing the generic executable icon for this menu-bar-first app.
-    private static func applyBundledApplicationIcon() {
-        guard
-            let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
-            let icon = NSImage(contentsOf: iconURL)
-        else {
-            TimbreLog.line("Timbre icon: bundled AppIcon.icns is missing")
-            return
-        }
-
-        NSApp.applicationIconImage = icon
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -211,10 +202,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         #endif
 
-        if !Self.shouldSkipGlobalShortcut(simulating: isSimulatedOnboarding) {
+        if !Self.shouldSkipGlobalShortcut(arguments: ProcessInfo.processInfo.arguments) {
             shortcutCoordinator.start()
-        } else if isSimulatedOnboarding {
-            TimbreLog.line("Timbre shortcut: skipped (simulated onboarding)")
         } else {
             TimbreLog.line("Timbre shortcut: skipped (--parakeet-fixture)")
         }
@@ -233,14 +222,48 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         shortcutCoordinator.stop()
         controller.prepareForTermination()
+        #if DEBUG
+        integrationRuntime?.cleanupPersistentStateIfRequested()
+        #endif
         return .terminateNow
     }
 
-    private static func shouldSkipGlobalShortcut(simulating: Bool) -> Bool {
-        if simulating { return true }
+    func presentSetupWindow() {
+        guard let setupCoordinator else { return }
+        if setupWindowController == nil {
+            setupWindowController = SetupWindowController(
+                coordinator: setupCoordinator,
+                shouldRestoreAccessory: { [weak self] in
+                    #if DEBUG
+                    if Self.wantsDebugWindow
+                        || self?.integrationRuntime?.configuration.showsMenuHost == true
+                    {
+                        return false
+                    }
+                    #endif
+                    return self?.debugWindow?.isVisible != true
+                },
+                shortcutRecorderName: shortcutRecorderName
+            )
+        }
+        setupWindowController?.present()
+    }
+
+    private static func applyBundledApplicationIcon() {
+        guard
+            let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+            let icon = NSImage(contentsOf: iconURL)
+        else {
+            TimbreLog.line("Timbre icon: bundled AppIcon.icns is missing")
+            return
+        }
+        NSApp.applicationIconImage = icon
+    }
+
+    private static func shouldSkipGlobalShortcut(arguments: [String]) -> Bool {
         #if DEBUG
         return TranscriptionBackendSelection.wantsParakeetFixture(
-            arguments: ProcessInfo.processInfo.arguments,
+            arguments: arguments,
             isDebug: true
         )
         #else
@@ -249,11 +272,11 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func isProductionParakeetBackend(arguments: [String]) -> Bool {
-#if DEBUG
+        #if DEBUG
         let isDebug = true
-#else
+        #else
         let isDebug = false
-#endif
+        #endif
         let resolution = TranscriptionBackendSelection.resolve(
             arguments: arguments,
             isDebug: isDebug
@@ -266,52 +289,30 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func shouldDisableModelPrewarm(arguments: [String]) -> Bool {
-#if DEBUG
-        if SimulatedOnboarding.isEnabled(arguments: arguments) {
-            return true
+        #if DEBUG
+        if IntegrationTestConfiguration.isRequested(arguments: arguments) {
+            return false
         }
         let isDebug = true
-#else
+        #else
         let isDebug = false
-#endif
+        #endif
         return ParakeetPrewarmCoordinator.shouldDisablePrewarm(
             arguments: arguments,
             isDebug: isDebug
         )
     }
 
-    func presentSetupWindow() {
-        guard let setupCoordinator else { return }
-        if setupWindowController == nil {
-            setupWindowController = SetupWindowController(
-                coordinator: setupCoordinator,
-                shouldRestoreAccessory: { [weak self] in
-                    #if DEBUG
-                    if Self.wantsDebugWindow { return false }
-                    #endif
-                    return self?.debugWindow?.isVisible != true
-                },
-                usesRealShortcutRecorder: usesRealShortcutRecorder
-            )
-        }
-        setupWindowController?.present()
-    }
-
-    /// DEBUG mock/fixture/UI paths use clipboard-only delivery so automation never pastes.
     private static func makeTranscriptDelivery(
         arguments: [String],
         targetProvider: any DictationTargetProviding,
-        accessibility: any AccessibilityPermissionProviding,
-        simulating: Bool
+        accessibility: any AccessibilityPermissionProviding
     ) -> any TranscriptDeliveryServicing {
-        if simulating {
-            return ClipboardOnlyTranscriptDelivery()
-        }
-#if DEBUG
+        #if DEBUG
         let isDebug = true
-#else
+        #else
         let isDebug = false
-#endif
+        #endif
         let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments, isDebug: isDebug)
         if !setupEnabled {
             return ClipboardOnlyTranscriptDelivery()
@@ -322,22 +323,15 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    /// Constructs the transcription backend without requesting microphone permission,
-    /// downloading files, or loading the model into memory.
     private static func makeTranscriptionService(
         modelManager: ParakeetModelManager,
-        arguments: [String],
-        simulating: Bool
+        arguments: [String]
     ) -> any TranscriptionServicing {
-#if DEBUG
-        if simulating {
-            TimbreLog.line("Timbre transcription backend: mock (simulated onboarding)")
-            return MockTranscriptionService()
-        }
+        #if DEBUG
         let isDebug = true
-#else
+        #else
         let isDebug = false
-#endif
+        #endif
         let resolution = TranscriptionBackendSelection.resolve(
             arguments: arguments,
             isDebug: isDebug
@@ -357,17 +351,16 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
         switch resolution.backend {
         case .mock:
-#if DEBUG
+            #if DEBUG
             return MockTranscriptionService()
-#else
-            // Unreachable: Release resolve always returns .parakeet.
+            #else
             return ParakeetTranscriptionService(
                 audioSource: ParakeetMicrophoneAudioSource(),
                 modelManager: modelManager
             )
-#endif
+            #endif
         case .parakeet:
-#if DEBUG
+            #if DEBUG
             if TranscriptionBackendSelection.wantsParakeetFixture(
                 arguments: arguments,
                 isDebug: true
@@ -380,172 +373,50 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     )
                 }
                 TimbreLog.line(
-                    "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; using microphone Parakeet (no Apple Speech fallback)."
+                    "Timbre: --parakeet-fixture requested but parakeet-smoke-test.wav is missing from the app bundle; using microphone Parakeet."
                 )
             }
-#endif
+            #endif
             return ParakeetTranscriptionService(
                 audioSource: ParakeetMicrophoneAudioSource(),
                 modelManager: modelManager
             )
         case .appleSpeech:
-#if DEBUG
+            #if DEBUG
             return SpeechRecognitionService()
-#else
-            // Unreachable: Release resolve always returns .parakeet.
+            #else
             return ParakeetTranscriptionService(
                 audioSource: ParakeetMicrophoneAudioSource(),
                 modelManager: modelManager
             )
-#endif
+            #endif
         }
     }
 
-#if DEBUG
-    private static func makeSimulatedPreferences(
-        config: SimulatedOnboarding.Configuration
-    ) -> InMemoryOnboardingPreferences {
-        switch config.initialStep {
-        case "shortcut", "shortcut-empty":
-            return InMemoryOnboardingPreferences(completedWelcome: true)
-        case "microphone",
-             "microphone-denied",
-             "accessibility",
-             "text-insertion",
-             "accessibility-denied",
-             "preparing",
-             "ready",
-             "failed":
-            return InMemoryOnboardingPreferences(
-                completedWelcome: true,
-                completedShortcutOnboarding: true
-            )
-        default:
-            return InMemoryOnboardingPreferences()
-        }
-    }
-
-    private static func makeSimulatedPermissionAndModel(
-        config: SimulatedOnboarding.Configuration
-    ) -> (
-        SimulatedMicrophonePermission,
-        SimulatedAccessibilityPermission,
-        SimulatedParakeetModelManager
-    ) {
-        switch config.initialStep {
-        case "microphone":
-            return (
-                SimulatedMicrophonePermission(status: .undetermined),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .notInstalled,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        case "microphone-denied":
-            return (
-                SimulatedMicrophonePermission(status: .denied),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .installed,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        case "accessibility", "text-insertion":
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(trustState: .notTrusted),
-                SimulatedParakeetModelManager(
-                    initialState: .installed,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        case "accessibility-denied":
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(
-                    trustState: .notTrusted,
-                    hasOfferedPrompt: true
-                ),
-                SimulatedParakeetModelManager(
-                    initialState: .installed,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        case "preparing":
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .notInstalled,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        case "ready":
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .installed,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: false
-                )
-            )
-        case "failed":
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .failed(message: "Something went wrong while getting Timbre ready."),
-                    durationSeconds: config.durationSeconds,
-                    failOnce: false
-                )
-            )
-        default:
-            return (
-                SimulatedMicrophonePermission(status: .granted),
-                SimulatedAccessibilityPermission(trustState: .trusted),
-                SimulatedParakeetModelManager(
-                    initialState: .notInstalled,
-                    durationSeconds: config.durationSeconds,
-                    failOnce: config.failOnce
-                )
-            )
-        }
-    }
-
+    #if DEBUG
     private static var wantsDebugWindow: Bool {
         ProcessInfo.processInfo.arguments.contains("--debug-window")
     }
 
     private func presentDebugWindowIfNeeded() {
-        guard Self.wantsDebugWindow else { return }
+        let wantsIntegrationHost = integrationRuntime?.configuration.showsMenuHost == true
+        guard Self.wantsDebugWindow || wantsIntegrationHost else { return }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 280),
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 300),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Timbre Debug"
+        window.title = wantsIntegrationHost ? "Timbre Integration Menu" : "Timbre Debug"
         window.contentView = NSHostingView(
-            rootView: MenuBarDictationView(
-                controller: controller,
-                setupCoordinator: nil,
-                shortcutCoordinator: shortcutCoordinator,
-                onOpenSetup: nil
-            )
-            .frame(minWidth: 320, minHeight: 220)
+            rootView: menuContent
+                .frame(minWidth: 320, minHeight: 240)
         )
         window.center()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         debugWindow = window
     }
-#endif
+    #endif
 }

@@ -362,6 +362,15 @@ final class SetupCoordinator {
         reconcile(intent: .requestMicrophone)
     }
 
+    /// Keeps model preparation running while suppressing a later Ready-only launch.
+    /// A failed or missing install clears this preference during reconciliation.
+    func continuePreparationInBackground() {
+        guard modelManager.state.isInstalling else { return }
+        preferences.dismissedReady = true
+        preferences.completedWelcome = true
+        TimbreLog.line("Timbre onboarding: continuing preparation in background")
+    }
+
     /// Call when the user chooses Done on the Ready screen.
     func acknowledgeReadyAndDismiss() {
         TimbreLog.line("Timbre onboarding: ready acknowledged")

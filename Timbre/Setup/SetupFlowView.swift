@@ -3,7 +3,7 @@ import SwiftUI
 
 struct SetupFlowView: View {
     @Bindable var coordinator: SetupCoordinator
-    var usesRealShortcutRecorder: Bool = true
+    var shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     var onContinueInBackground: (() -> Void)?
     var onDone: () -> Void
     @State private var isRecordingShortcut = false
@@ -235,15 +235,6 @@ struct SetupFlowView: View {
                 .accessibilityIdentifier("setupShortcutContinueButton")
             }
         )
-    }
-
-    private var shortcutRecorderName: KeyboardShortcuts.Name {
-        #if DEBUG
-        if !usesRealShortcutRecorder {
-            return .simulatedOnboarding
-        }
-        #endif
-        return .toggleDictation
     }
 
     private var microphone: some View {
@@ -526,101 +517,3 @@ private struct ShortcutKeyCapsView: View {
         return tokens.isEmpty ? [display] : tokens
     }
 }
-
-#if DEBUG
-#Preview("Welcome") {
-    SetupFlowView(
-        coordinator: SetupPreviewFactory.coordinator(stepSeed: .welcome),
-        usesRealShortcutRecorder: false,
-        onDone: {}
-    )
-    .frame(width: 600, height: 460)
-}
-
-#Preview("Shortcut") {
-    SetupFlowView(
-        coordinator: SetupPreviewFactory.coordinator(stepSeed: .shortcut),
-        usesRealShortcutRecorder: false,
-        onDone: {}
-    )
-    .frame(width: 600, height: 460)
-}
-
-#Preview("Preparing") {
-    SetupFlowView(
-        coordinator: SetupPreviewFactory.coordinator(stepSeed: .preparing),
-        usesRealShortcutRecorder: false,
-        onDone: {}
-    )
-    .frame(width: 600, height: 460)
-}
-
-#Preview("Ready") {
-    SetupFlowView(
-        coordinator: SetupPreviewFactory.coordinator(stepSeed: .ready),
-        usesRealShortcutRecorder: false,
-        onDone: {}
-    )
-    .frame(width: 600, height: 460)
-}
-
-@MainActor
-enum SetupPreviewFactory {
-    enum StepSeed {
-        case welcome
-        case shortcut
-        case preparing
-        case ready
-    }
-
-    static func coordinator(stepSeed: StepSeed) -> SetupCoordinator {
-        let preferences: InMemoryOnboardingPreferences
-        let model: SimulatedParakeetModelManager
-        let mic: SimulatedMicrophonePermission
-        let ax: SimulatedAccessibilityPermission
-        let shortcut: SimulatedShortcutOnboarding
-
-        switch stepSeed {
-        case .welcome:
-            preferences = InMemoryOnboardingPreferences()
-            model = SimulatedParakeetModelManager(initialState: .notInstalled)
-            mic = SimulatedMicrophonePermission(status: .undetermined)
-            ax = SimulatedAccessibilityPermission(trustState: .notTrusted)
-            shortcut = SimulatedShortcutOnboarding()
-        case .shortcut:
-            preferences = InMemoryOnboardingPreferences(completedWelcome: true)
-            model = SimulatedParakeetModelManager(initialState: .notInstalled)
-            mic = SimulatedMicrophonePermission(status: .granted)
-            ax = SimulatedAccessibilityPermission(trustState: .trusted)
-            shortcut = SimulatedShortcutOnboarding()
-        case .preparing:
-            preferences = InMemoryOnboardingPreferences(
-                completedWelcome: true,
-                completedShortcutOnboarding: true
-            )
-            model = SimulatedParakeetModelManager(initialState: .downloading, durationSeconds: 30)
-            mic = SimulatedMicrophonePermission(status: .granted)
-            ax = SimulatedAccessibilityPermission(trustState: .trusted)
-            shortcut = SimulatedShortcutOnboarding()
-        case .ready:
-            preferences = InMemoryOnboardingPreferences(
-                completedWelcome: true,
-                completedShortcutOnboarding: true
-            )
-            model = SimulatedParakeetModelManager(initialState: .installed)
-            mic = SimulatedMicrophonePermission(status: .granted)
-            ax = SimulatedAccessibilityPermission(trustState: .trusted)
-            shortcut = SimulatedShortcutOnboarding()
-        }
-
-        return SetupCoordinator(
-            modelManager: model,
-            microphone: mic,
-            accessibility: ax,
-            preferences: preferences,
-            shortcutOnboarding: shortcut,
-            featureEnabled: true
-        )
-    }
-}
-#endif

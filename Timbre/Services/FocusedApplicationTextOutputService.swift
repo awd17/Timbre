@@ -3,6 +3,14 @@ import ApplicationServices
 import Carbon.HIToolbox
 import Foundation
 
+@MainActor
+protocol PasteboardReading {
+    var changeCount: Int { get }
+    func string(forType dataType: NSPasteboard.PasteboardType) -> String?
+}
+
+extension NSPasteboard: PasteboardReading {}
+
 struct RunningProcessIdentity: Equatable, Sendable {
     let processIdentifier: pid_t
     let bundleIdentifier: String?
@@ -110,7 +118,7 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
     private let processLookup: any RunningProcessLooking
     private let secureInputDetector: any SecureInputDetecting
     private let selfBundleIdentifier: String?
-    private let pasteboard: NSPasteboard
+    private let pasteboard: any PasteboardReading
 
     init(
         clipboard: ClipboardServicing = ClipboardService(),
@@ -120,7 +128,7 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
         processLookup: (any RunningProcessLooking)? = nil,
         secureInputDetector: (any SecureInputDetecting)? = nil,
         selfBundleIdentifier: String? = Bundle.main.bundleIdentifier,
-        pasteboard: NSPasteboard = .general
+        pasteboard: any PasteboardReading = NSPasteboard.general
     ) {
         self.clipboard = clipboard
         self.accessibility = accessibility
