@@ -291,6 +291,30 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
         XCTAssertEqual(adapter.displayString, "⇧⌘J")
     }
 
+    func testSetupReplacementBecomesSettingsRollbackShortcut() {
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift]),
+            for: .integrationTestToggleDictation
+        )
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+
+        let replacement = KeyboardShortcuts.Shortcut(.j, modifiers: [.command, .shift])
+        KeyboardShortcuts.setShortcut(replacement, for: .integrationTestToggleDictation)
+        adapter.applyRecorderChange(isAssigned: true, displayString: replacement.description)
+
+        KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
+        adapter.applySettingsRecorderChange(nil)
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            replacement
+        )
+    }
+
     func testSettingsUsesRecommendedShortcutWhenNoRollbackExists() {
         KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
         let adapter = KeyboardShortcutsOnboardingAdapter(

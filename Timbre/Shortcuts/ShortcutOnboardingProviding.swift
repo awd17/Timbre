@@ -35,6 +35,9 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
     func applyRecorderChange(isAssigned: Bool, displayString: String?) {
         if isAssigned, let shortcut = KeyboardShortcuts.getShortcut(for: name) {
             lastAssignedShortcut = shortcut
+            if settingsRollbackShortcut != nil {
+                settingsRollbackShortcut = shortcut
+            }
         }
         hasAssignedShortcut = isAssigned
         self.displayString = displayString?.isEmpty == false
@@ -49,6 +52,9 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
         let shortcut = KeyboardShortcuts.getShortcut(for: name)
         if let shortcut {
             lastAssignedShortcut = shortcut
+            if settingsRollbackShortcut != nil {
+                settingsRollbackShortcut = shortcut
+            }
         }
         let effectiveShortcut = shortcut ?? settingsRollbackShortcut
         hasAssignedShortcut = effectiveShortcut != nil
