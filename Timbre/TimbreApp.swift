@@ -60,6 +60,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     private var debugWindowCloseDelegate: DebugWindowCloseDelegate?
     #endif
     private var setupWindowController: SetupWindowController?
+    private var acceptsDockReopenRequests = false
     #if DEBUG
     private let integrationRuntime: IntegrationTestRuntime?
     #endif
@@ -288,6 +289,14 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         prewarmCoordinator?.evaluate(source: .launchReadiness)
+
+        Task { @MainActor [weak self] in
+            // LaunchServices (including Xcode Run) can send a reopen while it
+            // activates a newly launched accessory app. Only later Dock
+            // reopens should present Settings.
+            await Task.yield()
+            self?.acceptsDockReopenRequests = true
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -307,8 +316,29 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
+        guard Self.shouldOpenSettingsForReopen(
+            acceptsDockReopenRequests: acceptsDockReopenRequests,
+            showInDock: appPreferences.showInDock
+        ) else {
+            return false
+        }
         settingsOpeningCoordinator.open()
         return true
+    }
+
+    func applicationShouldSaveSecureApplicationState(_ app: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldRestoreSecureApplicationState(_ app: NSApplication) -> Bool {
+        false
+    }
+
+    static func shouldOpenSettingsForReopen(
+        acceptsDockReopenRequests: Bool,
+        showInDock: Bool
+    ) -> Bool {
+        acceptsDockReopenRequests && showInDock
     }
 
     func presentSetupWindow() {

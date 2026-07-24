@@ -185,6 +185,36 @@ final class BundleInformationTests: XCTestCase {
     }
 }
 
+@MainActor
+final class AppLaunchPresentationTests: XCTestCase {
+    func testSettingsOpenOnlyForPostLaunchDockReopenWhenDockIsVisible() {
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldOpenSettingsForReopen(
+                acceptsDockReopenRequests: false,
+                showInDock: false
+            )
+        )
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldOpenSettingsForReopen(
+                acceptsDockReopenRequests: false,
+                showInDock: true
+            )
+        )
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldOpenSettingsForReopen(
+                acceptsDockReopenRequests: true,
+                showInDock: false
+            )
+        )
+        XCTAssertTrue(
+            TimbreAppDelegate.shouldOpenSettingsForReopen(
+                acceptsDockReopenRequests: true,
+                showInDock: true
+            )
+        )
+    }
+}
+
 #if DEBUG
 @MainActor
 final class DebugWindowCloseDelegateTests: XCTestCase {
