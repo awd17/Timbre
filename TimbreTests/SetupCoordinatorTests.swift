@@ -204,7 +204,7 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { coordinator.step == .ready }
     }
 
-    func testClearingShortcutLaterKeepsCompletedSetupAndMenuDictation() {
+    func testMissingShortcutAfterCompletedSetupReturnsToShortcutRecovery() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
@@ -214,10 +214,29 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.allowsDictation)
 
         coordinator.shortcutRecorderDidChange(isAssigned: false, displayString: nil)
-        XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertTrue(coordinator.allowsDictation)
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertTrue(coordinator.shouldAutoPresent)
+        XCTAssertEqual(coordinator.menuActionTitle, "Finish Setup…")
+        XCTAssertEqual(coordinator.menuStatusText, "Choose your dictation shortcut")
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
         XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
+    }
+
+    func testIncompleteShortcutSetupCannotBeAcknowledgedAsReady() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let shortcut = FakeShortcutOnboarding(hasAssignedShortcut: false)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .installed),
+            shortcut: shortcut
+        )
+
+        coordinator.acknowledgeReadyAndDismiss()
+
+        XCTAssertEqual(coordinator.step, .shortcut)
+        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertFalse(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
     }
 
     func testMicGrantedStartsInstallAfterShortcut() async {

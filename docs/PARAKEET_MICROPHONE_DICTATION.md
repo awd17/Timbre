@@ -83,7 +83,7 @@ Start and Stop may come from the menu or the global shortcut (`⌃⇧D`; see [`G
 2. Listening (no live transcript text)
 3. Stop → Processing (convert snapshot → Parakeet inference)
 4. Completed → transcript copied; Command-V posted when target validation allows
-5. Copy Again copies only (never pastes again)
+5. Copy Last Dictation copies only (never pastes again)
 6. A second Start reuses the loaded manager (no redownload)
 
 Permissions: **microphone** and **Accessibility** (no Speech Recognition authorization on the production path).

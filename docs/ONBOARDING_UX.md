@@ -99,7 +99,9 @@ the model cache only for true end-to-end download testing.
 
 ## Menu UI
 
-Menu-bar popover polish is intentionally deferred. Menu chrome still uses the shared coordinator readiness signals (`Finish Setup…`, `Getting Ready…`, etc.).
+The native compact menu uses the shared coordinator readiness signals to add a
+temporary `Finish Setup…`, `Getting Ready…`, or failure-recovery command. Normal
+menu commands remain Settings, Copy Last Dictation, and Quit.
 
 ## Related
 

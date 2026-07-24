@@ -31,7 +31,7 @@ are not partially restored. A newer clipboard generation always wins; see
 [`SETTINGS.md`](SETTINGS.md) for limitations.
 ```
 
-Copy Again copies only; it never pastes again.
+Copy Last Dictation copies only; it never pastes again.
 
 ## Setup vs in-session clipboard fallback
 
@@ -116,8 +116,8 @@ Result:
 
 - `pasteEventPosted` → status “Inserted.” (events posted; acceptance not universally confirmable)
 - `copiedAfterInsertFailure(...)` → “Couldn't insert text. Copied instead.”
-- `copiedByDesign` → “Copied to clipboard.” for Copy Again and DEBUG clipboard-only mode
-- `failed(.clipboardUnavailable)` → “Couldn't copy or insert text.” while retaining the transcript in Timbre for another Copy Again attempt
+- `copiedByDesign` → “Copied to clipboard.” for Copy Last Dictation and DEBUG clipboard-only mode
+- `failed(.clipboardUnavailable)` → “Couldn't copy or insert text.” while retaining the transcript in Timbre for another Copy Last Dictation attempt
 
 DEBUG mock / fixture / `--disable-setup` / UI tests inject `ClipboardOnlyTranscriptDelivery` so automation never posts real paste events.
 

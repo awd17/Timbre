@@ -1,14 +1,14 @@
 # Settings
 
-Timbre provides one native macOS Settings window, opened from the menu-bar
-popover, the application menu, Command-comma, or the Dock icon when Dock
+Timbre provides one native macOS Settings window, opened from the compact
+menu-bar menu, the application menu, Command-comma, or the Dock icon when Dock
 visibility is enabled. Repeated actions focus the same window.
 
 ## User settings
 
 | Setting | Default | Behavior |
 |---|---:|---|
-| Dictation shortcut | Existing `⌃⇧D` default | Uses the same KeyboardShortcuts `.toggleDictation` value as onboarding. Clearing is allowed and displays “Not set”; menu Start/Stop remains available. |
+| Dictation shortcut | Existing `⌃⇧D` default | Required for dictation and shared with onboarding. Clearing is a temporary editing state; closing Settings without a replacement restores the previous shortcut. |
 | Show Timbre in Dock | Off | Switches Timbre between regular and accessory activation policy immediately. The menu-bar item remains available. |
 | Keep transcript on clipboard | Off | Leaves a successfully inserted transcript on the clipboard when enabled. |
 
@@ -40,5 +40,6 @@ preference. If Dock visibility is turned off while Settings is open, Timbre
 returns to accessory mode when the window closes. The existing AppIcon catalog
 contains all macOS sizes; visual redesign remains release work if desired.
 
-The menu-bar popover redesign is the next UI milestone. The floating dictation
-indicator remains later work.
+The native menu contains Settings, Copy Last Dictation, and Quit. Check for
+Updates, microphone-input controls, and the floating dictation indicator remain
+later work.

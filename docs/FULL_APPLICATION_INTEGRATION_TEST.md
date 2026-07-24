@@ -21,12 +21,12 @@ input. It verifies:
 
 - foreground onboarding, shortcut recording, permission denial/recovery,
   fake progress, one failed install, retry, Ready, and Done;
-- background onboarding, setup dismissal/reopen, live menu progress, the real
+- background onboarding, setup dismissal/reopen, conditional setup command, the real
   status item, and a single uninterrupted install;
-- production menu controls and real Carbon registration of the isolated
+- the native compact menu and real Carbon registration of the isolated
   `⌃⇧K` shortcut;
 - deterministic partial/final transcription, captured TextEdit identity,
-  isolated pasteboard output, the Command-V probe, Inserted status, and Copy Again;
+  isolated pasteboard output, the Command-V probe, and Copy Last Dictation;
 - busy-state deduplication, menu-bar-only relaunch without rebuilding,
   persisted shortcut/model state, and setup recovery without redownload;
 - safe clipboard fallback for target changes, terminated targets,
@@ -73,7 +73,7 @@ records generation, model state, install/session counts, paste attempts,
 paste text, and the exact delivery result.
 
 The optional host is not a test-specific menu implementation. It renders the
-same `MenuBarDictationView` configuration used by `MenuBarExtra`; the test also
+same `MenuBarMenuView` commands used by `MenuBarExtra`; the test also
 asserts the real `timbreStatusItem` exists.
 
 Release builds do not include the integration runtime code or controls.

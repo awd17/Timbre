@@ -192,8 +192,8 @@ final class TimbreUITests: XCTestCase {
         let menuWindow = app.windows["Timbre Integration Menu"]
         XCTAssertTrue(menuWindow.waitForExistence(timeout: 3), hierarchy(app, "Missing menu host"))
         XCTAssertTrue(
-            menuWindow.descendants(matching: .any)["setupStatusMessage"].waitForExistence(timeout: 3),
-            hierarchy(app, "Menu should expose background setup status")
+            menuWindow.buttons["setupMenuItem"].waitForExistence(timeout: 3),
+            hierarchy(app, "Menu should expose setup recovery")
         )
         _ = try realStatusItem(in: app)
 
@@ -202,7 +202,7 @@ final class TimbreUITests: XCTestCase {
         }
         XCTAssertEqual(firstAttempt.installAttempts, 1)
 
-        let reopen = menuWindow.buttons["setupMenuButton"]
+        let reopen = menuWindow.buttons["setupMenuItem"]
         XCTAssertTrue(reopen.waitForExistence(timeout: 3), hierarchy(app, "Missing setup reopen"))
         reopen.click()
         XCTAssertTrue(
@@ -213,7 +213,7 @@ final class TimbreUITests: XCTestCase {
         app.buttons["setupContinueInBackgroundButton"].click()
 
         XCTAssertTrue(
-            menuWindow.buttons["startButton"].waitForExistence(timeout: 7),
+            menuWindow.buttons["settingsMenuItem"].waitForExistence(timeout: 7),
             hierarchy(app, "Menu did not become ready after background preparation")
         )
         let ready = try waitForProbe(backgroundProbeURL, timeout: 3) {
@@ -227,6 +227,10 @@ final class TimbreUITests: XCTestCase {
         guard let app else { return XCTFail("Background app was not launched") }
         let textEdit = launchTextEdit()
         let initial = try readProbe(backgroundProbeURL)
+        let initialCopy = app.windows["Timbre Integration Menu"]
+            .buttons["copyLastDictationMenuItem"]
+        XCTAssertTrue(initialCopy.waitForExistence(timeout: 3))
+        XCTAssertFalse(initialCopy.isEnabled)
 
         textEdit.activate()
         let armedStart = try armShortcutBurst(after: initial)
@@ -251,35 +255,19 @@ final class TimbreUITests: XCTestCase {
         XCTAssertEqual(inserted.lastPasteText, Self.transcript)
         XCTAssertEqual(inserted.lastDeliveryResult, "pasteEventPosted")
 
-        app.activate()
         let menuWindow = app.windows["Timbre Integration Menu"]
-        XCTAssertTrue(
-            waitForLabel(menuWindow.descendants(matching: .any)["statusMessage"], "Inserted."),
-            hierarchy(app, "Expected inserted completion status")
-        )
 
         let pasteAttemptsBeforeCopy = inserted.pasteAttempts
-        menuWindow.buttons["copyAgainButton"].click()
-        XCTAssertTrue(
-            waitForLabel(
-                menuWindow.descendants(matching: .any)["statusMessage"],
-                "Copied to clipboard."
-            )
-        )
+        let copy = menuWindow.buttons["copyLastDictationMenuItem"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 3))
+        XCTAssertTrue(copy.isEnabled)
+        copy.click()
         XCTAssertEqual(try readProbe(backgroundProbeURL).pasteAttempts, pasteAttemptsBeforeCopy)
 
-        textEdit.activate()
-        app.activate()
-        let beforeMenuSession = try readProbe(backgroundProbeURL)
-        menuWindow.buttons["startButton"].click()
-        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
-            $0.sessionStarts == beforeMenuSession.sessionStarts + 1
-        }
-        menuWindow.buttons["stopButton"].click()
-        let menuInserted = try waitForProbe(backgroundProbeURL, timeout: 5) {
-            $0.successfulPastes == beforeMenuSession.successfulPastes + 1
-        }
-        XCTAssertEqual(menuInserted.lastDeliveryResult, "pasteEventPosted")
+        XCTAssertFalse(menuWindow.buttons["startButton"].exists)
+        XCTAssertFalse(menuWindow.buttons["stopButton"].exists)
+        XCTAssertFalse(menuWindow.descendants(matching: .any)["transcriptText"].exists)
+        XCTAssertFalse(menuWindow.descendants(matching: .any)["statusMessage"].exists)
     }
 
     @MainActor
@@ -302,12 +290,13 @@ final class TimbreUITests: XCTestCase {
         let statusItem = try realStatusItem(in: app)
         statusItem.click()
         XCTAssertTrue(
-            waitForLabel(
-                app.descendants(matching: .any)["shortcutHint"],
-                "Press ⌃⇧K to start"
-            ),
-            hierarchy(app, "The second launch did not preserve the integration hotkey")
+            app.menuItems["Settings…"].waitForExistence(timeout: 3),
+            hierarchy(app, "The compact menu did not expose Settings")
         )
+        XCTAssertTrue(app.menuItems["Copy Last Dictation"].exists)
+        XCTAssertTrue(app.menuItems["Quit Timbre"].exists)
+        XCTAssertFalse(app.menuItems["Start"].exists)
+        XCTAssertFalse(app.menuItems["Stop"].exists)
         statusItem.click()
 
         let relaunched = try waitForProbe(backgroundProbeURL, timeout: 3) {
@@ -332,11 +321,13 @@ final class TimbreUITests: XCTestCase {
 
         var app = relaunchBackground(scenario: "clearShortcut", menuHost: true)
         XCTAssertTrue(
-            app.buttons["startButton"].waitForExistence(timeout: 5),
-            hierarchy(app, "Clearing a confirmed shortcut must leave menu dictation available")
+            app.buttons["setupShortcutSetButton"].waitForExistence(timeout: 5),
+            hierarchy(app, "A missing shortcut must reopen shortcut setup")
         )
-        XCTAssertFalse(app.buttons["setupShortcutContinueButton"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["shortcutHint"].exists)
+        try recordShortcut(in: app, mayAdvanceAutomatically: true)
+        if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
+            app.buttons["setupDoneButton"].click()
+        }
         XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, startingInstallAttempts)
 
         app = relaunchBackground(scenario: "microphoneRevoked", menuHost: true)
@@ -401,7 +392,7 @@ final class TimbreUITests: XCTestCase {
     @MainActor
     private func runQuit() throws {
         let app = relaunchBackground(scenario: "cleanup", menuHost: true)
-        let quit = app.windows["Timbre Integration Menu"].buttons["quitButton"]
+        let quit = app.windows["Timbre Integration Menu"].buttons["quitMenuItem"]
         XCTAssertTrue(quit.waitForExistence(timeout: 5), hierarchy(app, "Missing Quit"))
         quit.click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 5), "Quit must terminate Timbre")
@@ -431,15 +422,7 @@ final class TimbreUITests: XCTestCase {
         XCTAssertEqual(result.successfulPastes, before.successfulPastes)
         XCTAssertEqual(result.lastDeliveryResult, expectedResult)
 
-        app.activate()
-        XCTAssertTrue(
-            waitForLabel(
-                app.windows["Timbre Integration Menu"]
-                    .descendants(matching: .any)["statusMessage"],
-                "Couldn't insert text. Copied instead."
-            ),
-            hierarchy(app, "Expected insertion fallback status")
-        )
+        XCTAssertTrue(app.windows["Timbre Integration Menu"].waitForExistence(timeout: 3))
     }
 
     @MainActor

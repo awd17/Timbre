@@ -54,10 +54,12 @@ visually hidden `KeyboardShortcuts.RecorderCocoa` handles capture, validation,
 and conflict alerts after the button is pressed.
 
 Continue is disabled when the assigned shortcut is nil during first-run setup.
-Onboarding, Settings, Ready copy, and menu hints read the same live state for
-`.toggleDictation`. Settings may clear it; the UI then displays “Not set,” menu
-hints disappear, and menu Start/Stop remains usable without reopening onboarding.
-No second shortcut preference is stored.
+Onboarding, Settings, and Ready copy read the same live state for
+`.toggleDictation`. The shortcut is required because dictation is shortcut-only.
+Settings permits a temporary clear while editing, but restores the previous
+shortcut if the window closes without a replacement. Missing shortcut storage
+returns an existing user to the shortcut recovery step. No second shortcut
+preference is stored.
 
 The DEBUG full-app integration runtime injects
 `.integrationTestToggleDictation` into the same recorder, onboarding adapter,
@@ -75,7 +77,7 @@ Setup installing → ignored
 Setup required / failed → present setup window
 ```
 
-Menu Start/Stop call the same controller methods.
+The compact menu does not expose Start/Stop.
 
 ## Architecture
 
@@ -123,13 +125,13 @@ leaves only final Command-V posting behind a deterministic probe. See
 2. Launch Timbre; complete setup if needed (including shortcut confirmation).
 3. Focus TextEdit; press the chosen shortcut → Preparing/Listening without opening the menu.
 4. Speak; press the shortcut again → Processing → text inserted into TextEdit.
-5. Verify clipboard behavior for the current retention setting; Copy Again explicitly copies and does not paste again.
+5. Verify clipboard behavior for the current retention setting; Copy Last Dictation explicitly copies and does not paste again.
 6. Start a second session via the hotkey (model reuse).
 7. Mash during Processing → no overlapping session.
 8. Switch apps during Processing → no paste into the newly active app; transcript remains on clipboard.
 9. Reset setup → hotkey does not bypass onboarding.
 10. Close setup during download → hotkey no-ops; download continues.
-11. Menu Start/Stop still behave the same (menu path may briefly reactivate the captured target).
+11. The compact menu exposes only Settings, Copy Last Dictation, and Quit after setup.
 12. DEBUG `--mock-transcription` toggle works without posting real paste events.
 13. `--parakeet-fixture` skips global shortcut registration.
 

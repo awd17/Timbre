@@ -18,6 +18,8 @@ protocol ShortcutOnboardingProviding: AnyObject {
 @Observable
 final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
     private let name: KeyboardShortcuts.Name
+    private var lastAssignedShortcut: KeyboardShortcuts.Shortcut?
+    private var settingsRollbackShortcut: KeyboardShortcuts.Shortcut?
     private(set) var hasAssignedShortcut: Bool
     private(set) var displayString: String?
 
@@ -25,11 +27,15 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
         self.name = name
         // Touch the named shortcut so the package default is registered when unset.
         let shortcut = KeyboardShortcuts.getShortcut(for: name)
+        self.lastAssignedShortcut = shortcut
         self.hasAssignedShortcut = shortcut != nil
         self.displayString = shortcut?.description
     }
 
     func applyRecorderChange(isAssigned: Bool, displayString: String?) {
+        if isAssigned, let shortcut = KeyboardShortcuts.getShortcut(for: name) {
+            lastAssignedShortcut = shortcut
+        }
         hasAssignedShortcut = isAssigned
         self.displayString = displayString?.isEmpty == false
             ? displayString
@@ -41,7 +47,50 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
 
     func refreshFromStorage() {
         let shortcut = KeyboardShortcuts.getShortcut(for: name)
+        if let shortcut {
+            lastAssignedShortcut = shortcut
+        }
         hasAssignedShortcut = shortcut != nil
         displayString = shortcut?.description
+    }
+
+    func beginSettingsShortcutEditing() {
+        let shortcut = KeyboardShortcuts.getShortcut(for: name)
+        if let shortcut {
+            lastAssignedShortcut = shortcut
+        }
+        settingsRollbackShortcut = shortcut ?? lastAssignedShortcut
+            ?? DictationShortcutName.recommendedShortcut
+        applyRecorderChange(
+            isAssigned: shortcut != nil,
+            displayString: shortcut?.description
+        )
+    }
+
+    func applySettingsRecorderChange(_ shortcut: KeyboardShortcuts.Shortcut?) {
+        if let shortcut {
+            lastAssignedShortcut = shortcut
+            settingsRollbackShortcut = shortcut
+        }
+        applyRecorderChange(
+            isAssigned: shortcut != nil,
+            displayString: shortcut?.description
+        )
+    }
+
+    func finishSettingsShortcutEditing() {
+        defer { settingsRollbackShortcut = nil }
+
+        if let shortcut = KeyboardShortcuts.getShortcut(for: name) {
+            lastAssignedShortcut = shortcut
+            applyRecorderChange(isAssigned: true, displayString: shortcut.description)
+            return
+        }
+
+        let restored = settingsRollbackShortcut ?? lastAssignedShortcut
+            ?? DictationShortcutName.recommendedShortcut
+        KeyboardShortcuts.setShortcut(restored, for: name)
+        lastAssignedShortcut = restored
+        applyRecorderChange(isAssigned: true, displayString: restored.description)
     }
 }

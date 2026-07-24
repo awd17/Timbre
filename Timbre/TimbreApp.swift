@@ -18,7 +18,7 @@ struct TimbreApp: App {
                     )
                 )
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
 
         Settings {
             TimbreSettingsView(
@@ -65,11 +65,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     private let integrationRuntime: IntegrationTestRuntime?
     #endif
 
-    var menuContent: MenuBarDictationView {
-        MenuBarDictationView(
+    var menuContent: MenuBarMenuView {
+        MenuBarMenuView(
             controller: controller,
             setupCoordinator: setupCoordinator,
-            shortcutCoordinator: shortcutCoordinator,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
             },
@@ -523,8 +522,11 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
         window.delegate = closeDelegate
         window.contentView = NSHostingView(
-            rootView: menuContent
-                .frame(minWidth: 320, minHeight: 240)
+            rootView: VStack(alignment: .leading, spacing: 8) {
+                menuContent
+            }
+            .padding()
+            .frame(minWidth: 260, minHeight: 160, alignment: .topLeading)
         )
         window.center()
         window.makeKeyAndOrderFront(nil)

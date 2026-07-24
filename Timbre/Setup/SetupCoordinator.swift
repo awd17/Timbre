@@ -56,7 +56,7 @@ private enum SetupPolicy {
             return SetupDecision(step: .welcome, effect: .none)
         }
 
-        if !facts.completedShortcutOnboarding {
+        if !facts.completedShortcutOnboarding || !facts.hasAssignedShortcut {
             return SetupDecision(step: .shortcut, effect: .none)
         }
 
@@ -92,6 +92,7 @@ private enum SetupPolicy {
 
     static func allowsDictation(_ facts: SetupFacts) -> Bool {
         guard facts.completedShortcutOnboarding,
+              facts.hasAssignedShortcut,
               facts.microphone == .granted,
               facts.accessibility == .trusted
         else {
@@ -135,7 +136,7 @@ private enum SetupPolicy {
         }
 
         let status: String?
-        if !facts.completedShortcutOnboarding {
+        if !facts.completedShortcutOnboarding || !facts.hasAssignedShortcut {
             status = "Choose your dictation shortcut"
         } else if facts.model.isInstalled || facts.model == .loading {
             switch facts.microphone {
@@ -371,6 +372,10 @@ final class SetupCoordinator {
 
     /// Call when the user chooses Done on the Ready screen.
     func acknowledgeReadyAndDismiss() {
+        guard step == .ready, allowsDictation else {
+            TimbreLog.line("Timbre onboarding: ready acknowledgement ignored while setup is incomplete")
+            return
+        }
         TimbreLog.line("Timbre onboarding: ready acknowledged")
         reconcile(intent: .acknowledgeReady)
     }
