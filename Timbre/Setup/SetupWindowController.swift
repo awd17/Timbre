@@ -7,16 +7,16 @@ import SwiftUI
 final class SetupWindowController: NSObject, NSWindowDelegate {
     private let coordinator: SetupCoordinator
     private var window: NSWindow?
-    private let shouldRestoreAccessory: () -> Bool
+    private let dockVisibilityCoordinator: DockVisibilityCoordinator
     private let shortcutRecorderName: KeyboardShortcuts.Name
 
     init(
         coordinator: SetupCoordinator,
-        shouldRestoreAccessory: @escaping () -> Bool,
+        dockVisibilityCoordinator: DockVisibilityCoordinator,
         shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     ) {
         self.coordinator = coordinator
-        self.shouldRestoreAccessory = shouldRestoreAccessory
+        self.dockVisibilityCoordinator = dockVisibilityCoordinator
         self.shortcutRecorderName = shortcutRecorderName
         super.init()
     }
@@ -27,15 +27,14 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
 
     func present() {
         coordinator.presentRequestedFromMenu()
+        dockVisibilityCoordinator.beginTemporaryPresentation(.onboarding)
 
         if let window, window.isVisible {
             window.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            dockVisibilityCoordinator.activate()
             coordinator.markWindowVisible(true)
             return
         }
-
-        NSApp.setActivationPolicy(.regular)
 
         let setupWindow = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 600, height: 460),
@@ -87,7 +86,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         }
         #endif
         setupWindow.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        dockVisibilityCoordinator.activate()
         window = setupWindow
         coordinator.markWindowVisible(true)
     }
@@ -99,9 +98,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         coordinator.markWindowVisible(false)
-        if shouldRestoreAccessory() {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        dockVisibilityCoordinator.endTemporaryPresentation(.onboarding)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {

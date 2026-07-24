@@ -118,7 +118,9 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
     private let processLookup: any RunningProcessLooking
     private let secureInputDetector: any SecureInputDetecting
     private let selfBundleIdentifier: String?
-    private let pasteboard: any PasteboardReading
+    private let preferences: any AppPreferencesProviding
+    private let transcriptPasteboard: any TranscriptPasteboardServicing
+    private let onClipboardOutcome: (ClipboardRetentionOutcome) -> Void
 
     init(
         clipboard: ClipboardServicing = ClipboardService(),
@@ -128,7 +130,10 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
         processLookup: (any RunningProcessLooking)? = nil,
         secureInputDetector: (any SecureInputDetecting)? = nil,
         selfBundleIdentifier: String? = Bundle.main.bundleIdentifier,
-        pasteboard: any PasteboardReading = NSPasteboard.general
+        pasteboard: any PasteboardReading = NSPasteboard.general,
+        preferences: (any AppPreferencesProviding)? = nil,
+        transcriptPasteboard: (any TranscriptPasteboardServicing)? = nil,
+        onClipboardOutcome: @escaping (ClipboardRetentionOutcome) -> Void = { _ in }
     ) {
         self.clipboard = clipboard
         self.accessibility = accessibility
@@ -137,71 +142,68 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
         self.processLookup = processLookup ?? WorkspaceRunningProcessLookup()
         self.secureInputDetector = secureInputDetector ?? AccessibilitySecureInputDetector()
         self.selfBundleIdentifier = selfBundleIdentifier
-        self.pasteboard = pasteboard
+        self.preferences = preferences ?? UserDefaultsAppPreferences()
+        self.transcriptPasteboard = transcriptPasteboard
+            ?? TranscriptPasteboardService(
+                pasteboard: (pasteboard as? NSPasteboard) ?? .general
+            )
+        self.onClipboardOutcome = onClipboardOutcome
     }
 
     func deliver(
         _ transcript: String,
         to target: DictationTargetContext?
     ) async -> TranscriptDeliveryResult {
-        guard clipboard.copy(transcript) else {
-            TimbreLog.line("Timbre delivery: clipboard write failed")
-            return .failed(.clipboardUnavailable)
-        }
-        let changeCountAfterWrite = pasteboard.changeCount
-        TimbreLog.line("Timbre delivery: pasteboard write succeeded (changeCount \(changeCountAfterWrite))")
-
-        guard pasteboard.string(forType: .string) == transcript else {
-            TimbreLog.line("Timbre delivery: clipboard write validation failed")
-            return .failed(.clipboardUnavailable)
+        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failed(.emptyTranscript)
         }
 
         guard accessibility.trustState == .trusted else {
             TimbreLog.line("Timbre delivery: Accessibility not trusted; copy only")
-            return .copiedAfterInsertFailure(.accessibilityUntrusted)
+            return copyFallback(transcript, reason: .accessibilityUntrusted)
         }
 
         guard let target else {
             TimbreLog.line("Timbre delivery: missing target; copy only")
-            return .copiedAfterInsertFailure(.missingTarget)
+            return copyFallback(transcript, reason: .missingTarget)
         }
 
         if let selfBundleIdentifier,
            target.bundleIdentifier == selfBundleIdentifier
         {
             TimbreLog.line("Timbre delivery: target is Timbre; copy only")
-            return .copiedAfterInsertFailure(.targetIsSelf)
+            return copyFallback(transcript, reason: .targetIsSelf)
         }
 
         guard let running = processLookup.process(pid: target.processIdentifier),
               !running.isTerminated
         else {
             TimbreLog.line("Timbre delivery: target terminated; copy only")
-            return .copiedAfterInsertFailure(.targetTerminated)
+            return copyFallback(transcript, reason: .targetTerminated)
         }
 
         if let expectedBundle = target.bundleIdentifier {
             guard let actualBundle = running.bundleIdentifier else {
                 TimbreLog.line("Timbre delivery: ambiguous target identity; copy only")
-                return .copiedAfterInsertFailure(.ambiguousTargetIdentity)
+                return copyFallback(transcript, reason: .ambiguousTargetIdentity)
             }
             guard actualBundle == expectedBundle else {
                 TimbreLog.line("Timbre delivery: pid/bundle mismatch; copy only")
-                return .copiedAfterInsertFailure(.ambiguousTargetIdentity)
+                return copyFallback(transcript, reason: .ambiguousTargetIdentity)
             }
         } else {
             guard let expectedLaunchDate = target.launchDate,
                   running.launchDate == expectedLaunchDate
             else {
                 TimbreLog.line("Timbre delivery: pid/launch-date mismatch; copy only")
-                return .copiedAfterInsertFailure(.ambiguousTargetIdentity)
+                return copyFallback(transcript, reason: .ambiguousTargetIdentity)
             }
         }
 
         if let frontmostExternal = targetProvider.frontmostExternalTarget() {
             if !Self.targetsMatch(captured: target, frontmost: frontmostExternal) {
                 TimbreLog.line("Timbre delivery: frontmost changed; copy only")
-                return .copiedAfterInsertFailure(.frontmostChanged)
+                return copyFallback(transcript, reason: .frontmostChanged)
             }
         } else if targetProvider.isSelfFrontmost {
             // MenuBarExtra path: Timbre briefly owns focus. Reactivate only the
@@ -209,41 +211,86 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
             TimbreLog.line("Timbre delivery: Timbre frontmost; reactivating captured target")
             guard await targetProvider.activateTarget(target) else {
                 TimbreLog.line("Timbre delivery: target reactivation failed; copy only")
-                return .copiedAfterInsertFailure(.frontmostChanged)
+                return copyFallback(transcript, reason: .frontmostChanged)
             }
             guard let confirmed = targetProvider.frontmostExternalTarget(),
                   Self.targetsMatch(captured: target, frontmost: confirmed)
             else {
                 TimbreLog.line("Timbre delivery: target reactivation not confirmed; copy only")
-                return .copiedAfterInsertFailure(.frontmostChanged)
+                return copyFallback(transcript, reason: .frontmostChanged)
             }
         } else {
             TimbreLog.line("Timbre delivery: no usable frontmost app; copy only")
-            return .copiedAfterInsertFailure(.frontmostChanged)
+            return copyFallback(transcript, reason: .frontmostChanged)
         }
 
         if secureInputDetector.isSecureInputFocused(processIdentifier: target.processIdentifier) {
             TimbreLog.line("Timbre delivery: secure input field; copy only")
-            return .copiedAfterInsertFailure(.secureInputField)
+            return copyFallback(transcript, reason: .secureInputField)
         }
 
         TimbreLog.line("Timbre delivery: target validation succeeded")
 
-        if pasteboard.changeCount != changeCountAfterWrite
-            || pasteboard.string(forType: .string) != transcript
-        {
+        let keepTranscript = preferences.keepTranscriptOnClipboardAfterInsertion
+        let snapshotCapture = keepTranscript
+            ? PasteboardSnapshotCapture.unavailable
+            : transcriptPasteboard.captureCompleteSnapshot()
+        let snapshot: PasteboardSnapshot?
+        let retainedOutcome: ClipboardRetentionOutcome
+        switch snapshotCapture {
+        case .snapshot(let captured):
+            snapshot = captured
+            retainedOutcome = .transcriptIntentionallyRetained
+        case .unavailable:
+            snapshot = nil
+            retainedOutcome = keepTranscript
+                ? .transcriptIntentionallyRetained
+                : .restorationSkipped(.snapshotUnavailable)
+        }
+
+        guard let write = transcriptPasteboard.writeTranscript(
+            transcript,
+            restorationSnapshot: snapshot,
+            retainedOutcome: retainedOutcome,
+            onOutcome: onClipboardOutcome
+        ) else {
+            TimbreLog.line("Timbre delivery: clipboard write failed")
+            return .failed(.clipboardUnavailable)
+        }
+        TimbreLog.line(
+            "Timbre delivery: pasteboard write succeeded (changeCount \(write.changeCount))"
+        )
+
+        guard transcriptPasteboard.isCurrentWriteUnchanged(write) else {
             TimbreLog.line("Timbre delivery: pasteboard changed before paste")
-            guard clipboard.copy(transcript) else {
-                return .failed(.clipboardUnavailable)
-            }
+            transcriptPasteboard.cancelRestoration(
+                for: write,
+                outcome: .restorationSkipped(.clipboardChanged)
+            )
             return .copiedAfterInsertFailure(.pasteboardChanged)
         }
 
         guard pastePoster.postCommandV() else {
+            transcriptPasteboard.cancelRestoration(
+                for: write,
+                outcome: .insertionFailedTranscriptRetained(.eventPostFailed)
+            )
             return .copiedAfterInsertFailure(.eventPostFailed)
         }
 
         return .pasteEventPosted
+    }
+
+    private func copyFallback(
+        _ transcript: String,
+        reason: CopyFallbackReason
+    ) -> TranscriptDeliveryResult {
+        guard clipboard.copy(transcript) else {
+            return .failed(.clipboardUnavailable)
+        }
+        onClipboardOutcome(.insertionFailedTranscriptRetained(reason))
+        TimbreLog.line("Timbre clipboard: insertion failed; transcript retained (\(reason))")
+        return .copiedAfterInsertFailure(reason)
     }
 
     static func targetsMatch(

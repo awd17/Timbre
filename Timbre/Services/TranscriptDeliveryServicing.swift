@@ -14,6 +14,7 @@ enum CopyFallbackReason: Equatable, Sendable {
 
 enum TranscriptDeliveryFailure: Equatable, Sendable {
     case clipboardUnavailable
+    case emptyTranscript
 }
 
 enum TranscriptDeliveryResult: Equatable, Sendable {

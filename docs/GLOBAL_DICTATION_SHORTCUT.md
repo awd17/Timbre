@@ -53,7 +53,11 @@ Onboarding displays Timbre-styled keycaps above a **Set hotkey** button. A
 visually hidden `KeyboardShortcuts.RecorderCocoa` handles capture, validation,
 and conflict alerts after the button is pressed.
 
-Continue is disabled when the assigned shortcut is nil. Ready and menu hints read the same live display string.
+Continue is disabled when the assigned shortcut is nil during first-run setup.
+Onboarding, Settings, Ready copy, and menu hints read the same live state for
+`.toggleDictation`. Settings may clear it; the UI then displays “Not set,” menu
+hints disappear, and menu Start/Stop remains usable without reopening onboarding.
+No second shortcut preference is stored.
 
 The DEBUG full-app integration runtime injects
 `.integrationTestToggleDictation` into the same recorder, onboarding adapter,
@@ -118,8 +122,8 @@ leaves only final Command-V posting behind a deterministic probe. See
 1. Build Debug and Release.
 2. Launch Timbre; complete setup if needed (including shortcut confirmation).
 3. Focus TextEdit; press the chosen shortcut → Preparing/Listening without opening the menu.
-4. Speak; press the shortcut again → Processing → text inserted into TextEdit (and still on clipboard).
-5. Confirm clipboard still holds the transcript; Copy Again does not paste again.
+4. Speak; press the shortcut again → Processing → text inserted into TextEdit.
+5. Verify clipboard behavior for the current retention setting; Copy Again explicitly copies and does not paste again.
 6. Start a second session via the hotkey (model reuse).
 7. Mash during Processing → no overlapping session.
 8. Switch apps during Processing → no paste into the newly active app; transcript remains on clipboard.

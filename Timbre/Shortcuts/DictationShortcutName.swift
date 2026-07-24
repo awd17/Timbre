@@ -18,23 +18,18 @@ extension KeyboardShortcuts.Name {
 }
 
 enum DictationShortcutName {
-    /// Fallback display when the package has no stored shortcut yet.
-    static let temporaryDefaultDisplayString = "⌃⇧D"
     static let recommendedShortcut = KeyboardShortcuts.Shortcut(
         .d,
         modifiers: [.control, .shift]
     )
 
     @MainActor
-    static var displayString: String {
+    static var displayString: String? {
         displayString(for: .toggleDictation)
     }
 
     @MainActor
-    static func displayString(for name: KeyboardShortcuts.Name) -> String {
-        if let shortcut = KeyboardShortcuts.getShortcut(for: name) {
-            return shortcut.description
-        }
-        return temporaryDefaultDisplayString
+    static func displayString(for name: KeyboardShortcuts.Name) -> String? {
+        KeyboardShortcuts.getShortcut(for: name)?.description
     }
 }

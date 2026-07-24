@@ -102,6 +102,9 @@ Missing Accessibility blocks normal production Start (setup recovery). Clipboard
 Model availability: `AsrModels.modelsExist` / successful verify via FluidAudio.
 Accessibility readiness: live `AXIsProcessTrusted` only.
 Assigned shortcut: KeyboardShortcuts storage for `.toggleDictation` (separate from confirmation).
+After the shortcut step has been confirmed, the current assignment is not a
+general readiness requirement. Clearing it in Settings leaves menu dictation
+and setup readiness intact.
 
 ### Cache
 

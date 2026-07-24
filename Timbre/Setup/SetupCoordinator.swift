@@ -56,7 +56,7 @@ private enum SetupPolicy {
             return SetupDecision(step: .welcome, effect: .none)
         }
 
-        if !facts.completedShortcutOnboarding || !facts.hasAssignedShortcut {
+        if !facts.completedShortcutOnboarding {
             return SetupDecision(step: .shortcut, effect: .none)
         }
 
@@ -92,7 +92,6 @@ private enum SetupPolicy {
 
     static func allowsDictation(_ facts: SetupFacts) -> Bool {
         guard facts.completedShortcutOnboarding,
-              facts.hasAssignedShortcut,
               facts.microphone == .granted,
               facts.accessibility == .trusted
         else {
@@ -126,7 +125,6 @@ private enum SetupPolicy {
 
         if case .failed = facts.model,
            facts.completedShortcutOnboarding,
-           facts.hasAssignedShortcut,
            facts.microphone == .granted,
            facts.accessibility == .trusted
         {
@@ -137,7 +135,7 @@ private enum SetupPolicy {
         }
 
         let status: String?
-        if !facts.completedShortcutOnboarding || !facts.hasAssignedShortcut {
+        if !facts.completedShortcutOnboarding {
             status = "Choose your dictation shortcut"
         } else if facts.model.isInstalled || facts.model == .loading {
             switch facts.microphone {
@@ -242,7 +240,7 @@ final class SetupCoordinator {
 
     var preparationProgress: ModelPreparationProgress { modelManager.progress }
 
-    var shortcutDisplayString: String { shortcutOnboarding.displayString }
+    var shortcutDisplayString: String? { shortcutOnboarding.displayString }
 
     var canContinueFromShortcut: Bool { shortcutOnboarding.hasAssignedShortcut }
 
@@ -477,7 +475,6 @@ final class SetupCoordinator {
         case .installModel:
             let currentFacts = facts
             guard currentFacts.completedShortcutOnboarding,
-                  currentFacts.hasAssignedShortcut,
                   currentFacts.microphone == .granted,
                   currentFacts.accessibility == .trusted,
                   !modelManager.state.isInstalled

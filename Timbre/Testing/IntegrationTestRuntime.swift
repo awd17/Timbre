@@ -197,8 +197,13 @@ private extension TranscriptDeliveryResult {
             return "copiedByDesign"
         case .copiedAfterInsertFailure(let reason):
             return "copiedAfterInsertFailure.\(reason.integrationName)"
-        case .failed(.clipboardUnavailable):
-            return "failed.clipboardUnavailable"
+        case .failed(let failure):
+            switch failure {
+            case .clipboardUnavailable:
+                return "failed.clipboardUnavailable"
+            case .emptyTranscript:
+                return "failed.emptyTranscript"
+            }
         }
     }
 }
@@ -238,6 +243,8 @@ final class IntegrationTestRuntime {
     let shortcutOnboarding: KeyboardShortcutsOnboardingAdapter
     let shortcutService: KeyboardShortcutsGlobalShortcutService
     let transcription: IntegrationTranscriptionService
+    let pasteboard: NSPasteboard
+    let clipboard: ClipboardService
     private var shortcutBurstMonitorTask: Task<Void, Never>?
 
     init(configuration: IntegrationTestConfiguration) {
@@ -315,6 +322,9 @@ final class IntegrationTestRuntime {
             accessibility: accessibility,
             probe: probe
         )
+        let pasteboard = NSPasteboard.withUniqueName()
+        self.pasteboard = pasteboard
+        clipboard = ClipboardService(pasteboard: pasteboard)
 
         startShortcutBurstMonitor()
     }
@@ -364,29 +374,34 @@ final class IntegrationTestRuntime {
     }
 
     func makeDelivery(
-        targetProvider: any DictationTargetProviding
+        targetProvider: any DictationTargetProviding,
+        preferences: any AppPreferencesProviding
     ) -> any TranscriptDeliveryServicing {
         let deliveryAccessibility: any AccessibilityPermissionProviding =
             configuration.scenario == .accessibilityRevokedDuringDelivery
             ? IntegrationUntrustedDeliveryAccessibility(base: accessibility)
             : accessibility
-        let pasteboard = IntegrationPasteboardReader(
-            pasteboard: NSPasteboard.general,
+        let transcriptPasteboard = IntegrationTranscriptPasteboard(
+            base: TranscriptPasteboardService(pasteboard: pasteboard),
             simulatesRace: configuration.scenario == .pasteboardRace
         )
         let poster = IntegrationPasteCommandPoster(
             probe: probe,
+            pasteboard: pasteboard,
             shouldFail: configuration.scenario == .eventPostFailure
         )
         let secureInput: any SecureInputDetecting = configuration.scenario == .secureInput
             ? IntegrationSecureInputDetector()
             : AccessibilitySecureInputDetector()
         let delivery = FocusedApplicationTextOutputService(
+            clipboard: clipboard,
             accessibility: deliveryAccessibility,
             targetProvider: targetProvider,
             pastePoster: poster,
             secureInputDetector: secureInput,
-            pasteboard: pasteboard
+            pasteboard: pasteboard,
+            preferences: preferences,
+            transcriptPasteboard: transcriptPasteboard
         )
         return IntegrationRecordingDelivery(base: delivery, probe: probe)
     }
@@ -651,41 +666,63 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
 @MainActor
 final class IntegrationPasteCommandPoster: PasteCommandEventPosting {
     private let probe: IntegrationTestProbe
+    private let pasteboard: NSPasteboard
     private let shouldFail: Bool
 
-    init(probe: IntegrationTestProbe, shouldFail: Bool) {
+    init(
+        probe: IntegrationTestProbe,
+        pasteboard: NSPasteboard,
+        shouldFail: Bool
+    ) {
         self.probe = probe
+        self.pasteboard = pasteboard
         self.shouldFail = shouldFail
     }
 
     func postCommandV() -> Bool {
-        let text = NSPasteboard.general.string(forType: .string)
+        let text = pasteboard.string(forType: .string)
         probe.recordPasteAttempt(text: text, succeeded: !shouldFail)
         return !shouldFail
     }
 }
 
 @MainActor
-final class IntegrationPasteboardReader: PasteboardReading {
-    private let pasteboard: NSPasteboard
+final class IntegrationTranscriptPasteboard: TranscriptPasteboardServicing {
+    private let base: any TranscriptPasteboardServicing
     private let simulatesRace: Bool
-    private var changeCountReadCount = 0
 
-    init(pasteboard: NSPasteboard, simulatesRace: Bool) {
-        self.pasteboard = pasteboard
+    init(base: any TranscriptPasteboardServicing, simulatesRace: Bool) {
+        self.base = base
         self.simulatesRace = simulatesRace
     }
 
-    var changeCount: Int {
-        changeCountReadCount += 1
-        if simulatesRace && changeCountReadCount > 1 {
-            return pasteboard.changeCount + 1
-        }
-        return pasteboard.changeCount
+    func captureCompleteSnapshot() -> PasteboardSnapshotCapture {
+        base.captureCompleteSnapshot()
     }
 
-    func string(forType dataType: NSPasteboard.PasteboardType) -> String? {
-        pasteboard.string(forType: dataType)
+    func writeTranscript(
+        _ transcript: String,
+        restorationSnapshot: PasteboardSnapshot?,
+        retainedOutcome: ClipboardRetentionOutcome,
+        onOutcome: @escaping (ClipboardRetentionOutcome) -> Void
+    ) -> TrackedTranscriptWrite? {
+        base.writeTranscript(
+            transcript,
+            restorationSnapshot: restorationSnapshot,
+            retainedOutcome: retainedOutcome,
+            onOutcome: onOutcome
+        )
+    }
+
+    func isCurrentWriteUnchanged(_ write: TrackedTranscriptWrite) -> Bool {
+        !simulatesRace && base.isCurrentWriteUnchanged(write)
+    }
+
+    func cancelRestoration(
+        for write: TrackedTranscriptWrite,
+        outcome: ClipboardRetentionOutcome
+    ) {
+        base.cancelRestoration(for: write, outcome: outcome)
     }
 }
 

@@ -18,7 +18,7 @@ There is no multi-stage progress indicator. Steps transition in one branded wind
 Model download starts only when:
 
 1. The user has confirmed the shortcut onboarding step
-2. A shortcut is currently assigned
+2. A shortcut is assigned while completing the initial shortcut step
 3. Microphone permission is granted
 4. Accessibility is trusted
 
@@ -43,7 +43,9 @@ The temporary default `⌃⇧D` may already exist in storage before the user see
 
 Recorder changes update Continue immediately via the package’s public `KeyboardShortcuts.Recorder(for:onChange:)` callback and `ShortcutOnboardingProviding`.
 
-Clearing the shortcut later returns the user to shortcut recovery on the next reconcile. It does not invalidate or redownload the model.
+Clearing the shortcut later does not return the user to onboarding, invalidate
+the model, or block menu dictation. Ready copy and menu hints update to the
+unset state, and the shortcut can be assigned again in Settings.
 
 ## Closing during download
 

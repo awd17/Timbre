@@ -25,7 +25,7 @@ final class DictationShortcutCoordinator {
         self.presentSetup = presentSetup
     }
 
-    var displayString: String { shortcutService.displayString }
+    var displayString: String? { shortcutService.displayString }
 
     var isListening: Bool { shortcutService.isListening }
 
@@ -75,7 +75,7 @@ final class DictationShortcutCoordinator {
             session: controller.sessionState,
             setup: setup
         )
-        let chord = displayString
+        guard let chord = displayString else { return nil }
         switch action {
         case .start:
             return "Press \(chord) to start"

@@ -41,8 +41,9 @@ The UI and the controller do not depend on a specific speech engine.
 - Fixture-through-app gate via `--parakeet-fixture` (service → controller → clipboard)
 - **Shared `ParakeetModelManager`** with installed vs loaded states (`ensureInstalled` / `ensureLoaded`)
 - **First-run setup in Debug and Release** (welcome → shortcut → mic → text insertion → download/verify → ready)
-- Dictation readiness requires installed model, granted microphone, Accessibility trust, **and** a confirmed assigned shortcut
+- Dictation readiness requires installed model, granted microphone, Accessibility trust, and initial shortcut confirmation; a shortcut may later be cleared without reopening onboarding
 - **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; onboarding Recorder; toggle Start/Stop)
+- **Native Settings** with shared shortcut editing, Dock visibility, safe clipboard-retention policy, and About information
 - **Model prewarming** after setup readiness (`loadInstalledAndRetain`; never downloads; Start joins single-flight load)
 - **Onboarding visual polish** (branded setup window + background asset)
 - **Unified full-app integration lifecycle** (one UI test method; build once and relaunch the same binary)
@@ -50,7 +51,8 @@ The UI and the controller do not depend on a specific speech engine.
 ### Not started / out of this milestone
 
 - Live Parakeet partial transcription / streaming / VAD / auto-stop
-- Full Settings screen / user model controls
+- Menu-bar popover redesign (next)
+- Floating dictation indicator (later)
 - Floating panel
 - Read or replace selected text
 - Text rewrite and LLM features
@@ -169,7 +171,7 @@ TimbreUITests/
 - Keep the Parakeet smoke CLI working when changing FluidAudio usage.
 - Keep permission strings in the Xcode target Info settings.
 - Keep App Sandbox off unless a later task requires it.
-- Do not paste when a different third-party app is frontmost; always keep successful transcripts on the clipboard.
+- Do not paste when a different third-party app is frontmost; keep failed-insertion transcripts recoverable and never overwrite a detected newer clipboard generation.
 
 ## Out of scope
 
@@ -177,7 +179,7 @@ Do not start these items unless a task asks for them:
 
 - Live Parakeet partials / streaming ASR
 - Direct AX text replacement / selection rewrite
-- Full Settings screens
+- Additional technical or advanced Settings controls
 - Authentication
 - Billing
 - Packaging and notarization

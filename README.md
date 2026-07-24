@@ -3,8 +3,7 @@
 Menu-bar voice dictation for macOS.  
 Start a session from the status item, or press **Control+Shift+D** (`⌃⇧D`) from anywhere.  
 Speak, then stop (menu or the same shortcut).  
-The app transcribes locally with Parakeet, copies the text to the clipboard, and inserts it into the app you were using when you started (Accessibility permission required).
-The transcript also remains on the clipboard for Copy Again or manual paste if insertion cannot safely run.
+The app transcribes locally with Parakeet and inserts text into the app you were using when you started (Accessibility permission required). Timbre uses the clipboard internally and preserves the transcript when insertion cannot safely run.
 
 **Repository:** https://github.com/awd17/Timbre
 
@@ -56,7 +55,7 @@ full-application UI lifecycle without rebuilding. See
 In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
 On first launch (when setup is incomplete), complete onboarding: welcome → choose shortcut → microphone → text insertion → download/verify → Done.
 Open the waveform status item, or use your chosen global shortcut to Start/Stop without opening the menu.  
-Use Start, Stop, Copy Again, or Quit in the menu as before.
+Use Start, Stop, Copy Again, Settings, or Quit in the menu. Settings includes the shared dictation shortcut, Dock visibility (off by default), clipboard retention (off by default), and version information. See [`docs/SETTINGS.md`](docs/SETTINGS.md).
 
 The temporary default shortcut is **⌃⇧D** until you change it in onboarding. See [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md) and [`docs/GLOBAL_DICTATION_SHORTCUT.md`](docs/GLOBAL_DICTATION_SHORTCUT.md).
 
@@ -111,7 +110,7 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 # Launch the Release .app from DerivedData Build/Products/Release/Timbre.app
 ```
 
-Confirm: setup appears; choose shortcut → microphone → text insertion before download; Start/Stop inserts into the focused app and keeps the transcript on the clipboard; DEBUG flags passed to the Release binary do not change backend or bypass setup.
+Confirm: setup appears; choose shortcut → microphone → text insertion before download; Start/Stop inserts into the focused app; clipboard retention follows Settings; DEBUG flags passed to the Release binary do not change backend or bypass setup.
 
 Details: [`docs/SETUP_AND_MODEL_MANAGEMENT.md`](docs/SETUP_AND_MODEL_MANAGEMENT.md), [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md), [`docs/PARAKEET_MICROPHONE_DICTATION.md`](docs/PARAKEET_MICROPHONE_DICTATION.md), and [`docs/FOCUSED_APP_TEXT_INSERTION.md`](docs/FOCUSED_APP_TEXT_INSERTION.md).
 

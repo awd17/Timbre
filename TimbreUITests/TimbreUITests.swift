@@ -71,8 +71,8 @@ final class TimbreUITests: XCTestCase {
         try runBackgroundOnboarding()
         try runNormalDictationAndBusyStates()
         try runSecondLaunchWithoutHostOrRebuild()
-        try runSetupRecoveryScenarios()
         try runDeliverySafetyScenarios()
+        try runSetupRecoveryScenarios()
         try runQuit()
     }
 
@@ -250,7 +250,6 @@ final class TimbreUITests: XCTestCase {
         XCTAssertEqual(inserted.sessionStops, initial.sessionStops + 1)
         XCTAssertEqual(inserted.lastPasteText, Self.transcript)
         XCTAssertEqual(inserted.lastDeliveryResult, "pasteEventPosted")
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
 
         app.activate()
         let menuWindow = app.windows["Timbre Integration Menu"]
@@ -268,7 +267,6 @@ final class TimbreUITests: XCTestCase {
             )
         )
         XCTAssertEqual(try readProbe(backgroundProbeURL).pasteAttempts, pasteAttemptsBeforeCopy)
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
 
         textEdit.activate()
         app.activate()
@@ -333,16 +331,12 @@ final class TimbreUITests: XCTestCase {
         let startingInstallAttempts = try readProbe(backgroundProbeURL).installAttempts
 
         var app = relaunchBackground(scenario: "clearShortcut", menuHost: true)
-        let shortcutContinue = app.buttons["setupShortcutContinueButton"]
-        XCTAssertTrue(shortcutContinue.waitForExistence(timeout: 5), hierarchy(app, "Missing shortcut recovery"))
-        XCTAssertFalse(shortcutContinue.isEnabled)
-        try recordShortcut(in: app, mayAdvanceAutomatically: true)
-        if shortcutContinue.exists {
-            shortcutContinue.click()
-        }
-        if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
-            app.buttons["setupDoneButton"].click()
-        }
+        XCTAssertTrue(
+            app.buttons["startButton"].waitForExistence(timeout: 5),
+            hierarchy(app, "Clearing a confirmed shortcut must leave menu dictation available")
+        )
+        XCTAssertFalse(app.buttons["setupShortcutContinueButton"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["shortcutHint"].exists)
         XCTAssertEqual(try readProbe(backgroundProbeURL).installAttempts, startingInstallAttempts)
 
         app = relaunchBackground(scenario: "microphoneRevoked", menuHost: true)
@@ -436,7 +430,6 @@ final class TimbreUITests: XCTestCase {
         }
         XCTAssertEqual(result.successfulPastes, before.successfulPastes)
         XCTAssertEqual(result.lastDeliveryResult, expectedResult)
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), Self.transcript)
 
         app.activate()
         XCTAssertTrue(

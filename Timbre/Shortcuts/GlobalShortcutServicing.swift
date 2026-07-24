@@ -15,6 +15,6 @@ protocol GlobalShortcutServicing: AnyObject {
     /// Best-effort observation after start — not a cross-app conflict oracle.
     var isListening: Bool { get }
 
-    /// Symbolic shortcut string for menu hints (e.g. `⌃⇧D`).
-    var displayString: String { get }
+    /// Symbolic shortcut string for menu hints (e.g. `⌃⇧D`), or nil when cleared.
+    var displayString: String? { get }
 }

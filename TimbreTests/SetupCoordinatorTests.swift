@@ -204,7 +204,7 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { coordinator.step == .ready }
     }
 
-    func testClearingShortcutLaterRecoversWithoutRedownload() {
+    func testClearingShortcutLaterKeepsCompletedSetupAndMenuDictation() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
@@ -214,8 +214,8 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.allowsDictation)
 
         coordinator.shortcutRecorderDidChange(isAssigned: false, displayString: nil)
-        XCTAssertEqual(coordinator.step, .shortcut)
-        XCTAssertFalse(coordinator.allowsDictation)
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertTrue(coordinator.allowsDictation)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
         XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.completedShortcutOnboardingKey))
     }

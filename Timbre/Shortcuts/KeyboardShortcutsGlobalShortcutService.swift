@@ -24,7 +24,7 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
         KeyboardShortcuts.isEnabled(for: name)
     }
 
-    var displayString: String {
+    var displayString: String? {
         DictationShortcutName.displayString(for: name)
     }
 
@@ -44,7 +44,7 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
                 "Timbre shortcut: toggleDictation is not listening after start (shortcut unset or Carbon registration inactive)."
             )
         } else {
-            TimbreLog.line("Timbre shortcut: listening for \(displayString)")
+            TimbreLog.line("Timbre shortcut: listening for \(displayString ?? "unknown shortcut")")
         }
     }
 

@@ -15,6 +15,43 @@ final class FakePasteCommandPoster: PasteCommandEventPosting {
 }
 
 @MainActor
+private final class AppKitTextViewPastePoster: PasteCommandEventPosting {
+    private let pasteboard: NSPasteboard
+    private let textView: NSTextView
+
+    init(pasteboard: NSPasteboard, textView: NSTextView) {
+        self.pasteboard = pasteboard
+        self.textView = textView
+    }
+
+    func postCommandV() -> Bool {
+        textView.readSelection(from: pasteboard)
+    }
+}
+
+@MainActor
+private final class TwoPhaseAppKitPastePoster: PasteCommandEventPosting {
+    private let pasteboard: NSPasteboard
+    private let textView: NSTextView
+    private(set) var didCommitPaste = false
+
+    init(pasteboard: NSPasteboard, textView: NSTextView) {
+        self.pasteboard = pasteboard
+        self.textView = textView
+    }
+
+    func postCommandV() -> Bool {
+        guard pasteboard.string(forType: .string) != nil else { return false }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(25))
+            guard let self else { return }
+            didCommitPaste = textView.readSelection(from: pasteboard)
+        }
+        return true
+    }
+}
+
+@MainActor
 final class FakeRunningProcessLookup: RunningProcessLooking {
     var processes: [pid_t: RunningProcessIdentity] = [:]
 
@@ -59,6 +96,101 @@ final class FocusedApplicationTextOutputServiceTests: XCTestCase {
         XCTAssertEqual(result, .pasteEventPosted)
         XCTAssertEqual(pasteboard.string(forType: .string), "hello")
         XCTAssertEqual(poster.postCount, 1)
+    }
+
+    func testSuccessfulDeliveryInsertsIntoAppKitTextViewAndRestoresClipboard() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("previous clipboard", forType: .string))
+
+        let textView = NSTextView()
+        textView.string = "Before "
+        textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
+
+        let targets = FakeDictationTargetProvider()
+        targets.frontmostExternal = sampleTarget
+        let preferences = InMemoryAppPreferences(
+            keepTranscriptOnClipboardAfterInsertion: false
+        )
+        let pasteboardService = TranscriptPasteboardService(pasteboard: pasteboard)
+        let poster = AppKitTextViewPastePoster(
+            pasteboard: pasteboard,
+            textView: textView
+        )
+        let lookup = FakeRunningProcessLookup()
+        lookup.processes[sampleTarget.processIdentifier] = RunningProcessIdentity(
+            processIdentifier: sampleTarget.processIdentifier,
+            bundleIdentifier: sampleTarget.bundleIdentifier,
+            isTerminated: false
+        )
+        var outcomes: [ClipboardRetentionOutcome] = []
+        let service = FocusedApplicationTextOutputService(
+            clipboard: ClipboardService(pasteboard: pasteboard),
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
+            targetProvider: targets,
+            pastePoster: poster,
+            processLookup: lookup,
+            secureInputDetector: FakeSecureInputDetector(),
+            selfBundleIdentifier: "com.timbre.app",
+            pasteboard: pasteboard,
+            preferences: preferences,
+            transcriptPasteboard: pasteboardService,
+            onClipboardOutcome: { outcomes.append($0) }
+        )
+
+        let result = await service.deliver("inserted text", to: sampleTarget)
+
+        XCTAssertEqual(result, .pasteEventPosted)
+        XCTAssertEqual(textView.string, "Before inserted text")
+        await waitUntil { outcomes == [.previousClipboardRestored] }
+        XCTAssertEqual(pasteboard.string(forType: .string), "previous clipboard")
+    }
+
+    func testTwoPhaseAppKitConsumerStillReceivesTranscriptBeforeRestoration() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("previous clipboard", forType: .string))
+
+        let textView = NSTextView()
+        let targets = FakeDictationTargetProvider()
+        targets.frontmostExternal = sampleTarget
+        let poster = TwoPhaseAppKitPastePoster(
+            pasteboard: pasteboard,
+            textView: textView
+        )
+        let lookup = FakeRunningProcessLookup()
+        lookup.processes[sampleTarget.processIdentifier] = RunningProcessIdentity(
+            processIdentifier: sampleTarget.processIdentifier,
+            bundleIdentifier: sampleTarget.bundleIdentifier,
+            isTerminated: false
+        )
+        var outcomes: [ClipboardRetentionOutcome] = []
+        let service = FocusedApplicationTextOutputService(
+            clipboard: ClipboardService(pasteboard: pasteboard),
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
+            targetProvider: targets,
+            pastePoster: poster,
+            processLookup: lookup,
+            secureInputDetector: FakeSecureInputDetector(),
+            selfBundleIdentifier: "com.timbre.app",
+            pasteboard: pasteboard,
+            preferences: InMemoryAppPreferences(
+                keepTranscriptOnClipboardAfterInsertion: false
+            ),
+            transcriptPasteboard: TranscriptPasteboardService(
+                pasteboard: pasteboard,
+                restorationGracePeriod: .milliseconds(100)
+            ),
+            onClipboardOutcome: { outcomes.append($0) }
+        )
+
+        let result = await service.deliver("inserted text", to: sampleTarget)
+
+        XCTAssertEqual(result, .pasteEventPosted)
+        await waitUntil { poster.didCommitPaste }
+        XCTAssertEqual(textView.string, "inserted text")
+        await waitUntil { outcomes == [.previousClipboardRestored] }
+        XCTAssertEqual(pasteboard.string(forType: .string), "previous clipboard")
     }
 
     func testUntrustedCopiesOnly() async {
@@ -308,7 +440,7 @@ final class FocusedApplicationTextOutputServiceTests: XCTestCase {
         pasteboard: NSPasteboard,
         accessibility: FakeAccessibilityPermission,
         targets: FakeDictationTargetProvider,
-        poster: FakePasteCommandPoster,
+        poster: any PasteCommandEventPosting,
         processLookup: FakeRunningProcessLookup? = nil,
         secureInput: FakeSecureInputDetector? = nil
     ) -> FocusedApplicationTextOutputService {
