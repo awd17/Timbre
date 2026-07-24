@@ -250,7 +250,12 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
 
         KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
         adapter.applySettingsRecorderChange(nil)
-        XCTAssertFalse(adapter.hasAssignedShortcut)
+        XCTAssertTrue(adapter.hasAssignedShortcut)
+        XCTAssertEqual(adapter.displayString, "⌃⇧K")
+
+        adapter.refreshFromStorage()
+        XCTAssertTrue(adapter.hasAssignedShortcut)
+        XCTAssertEqual(adapter.displayString, "⌃⇧K")
 
         adapter.finishSettingsShortcutEditing()
 

@@ -50,8 +50,9 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
         if let shortcut {
             lastAssignedShortcut = shortcut
         }
-        hasAssignedShortcut = shortcut != nil
-        displayString = shortcut?.description
+        let effectiveShortcut = shortcut ?? settingsRollbackShortcut
+        hasAssignedShortcut = effectiveShortcut != nil
+        displayString = effectiveShortcut?.description
     }
 
     func beginSettingsShortcutEditing() {
@@ -72,9 +73,10 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
             lastAssignedShortcut = shortcut
             settingsRollbackShortcut = shortcut
         }
+        let effectiveShortcut = shortcut ?? settingsRollbackShortcut
         applyRecorderChange(
-            isAssigned: shortcut != nil,
-            displayString: shortcut?.description
+            isAssigned: effectiveShortcut != nil,
+            displayString: effectiveShortcut?.description
         )
     }
 
