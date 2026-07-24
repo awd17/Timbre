@@ -170,10 +170,12 @@ struct SetupFlowView: View {
                             .foregroundStyle(.white.opacity(0.48))
 
                         if coordinator.canContinueFromShortcut {
-                            ShortcutKeyCapsView(displayString: coordinator.shortcutDisplayString)
-                                .accessibilityElement(children: .ignore)
-                                .accessibilityLabel("Current hotkey \(coordinator.shortcutDisplayString)")
-                                .accessibilityIdentifier("setupShortcutKeyCaps")
+                            if let shortcut = coordinator.shortcutDisplayString {
+                                ShortcutKeyCapsView(displayString: shortcut)
+                                    .accessibilityElement(children: .ignore)
+                                    .accessibilityLabel("Current hotkey \(shortcut)")
+                                    .accessibilityIdentifier("setupShortcutKeyCaps")
+                            }
                         } else {
                             Text("Not set")
                                 .font(.system(size: 14, weight: .medium))
@@ -378,19 +380,29 @@ struct SetupFlowView: View {
             subtitle: "",
             hero: { appIconHero },
             content: {
-                HStack(spacing: 7) {
-                    Text("Press")
-                    ShortcutKeyCapsView(displayString: coordinator.shortcutDisplayString)
-                    Text("to start dictating anywhere.")
+                Group {
+                    if let shortcut = coordinator.shortcutDisplayString {
+                        HStack(spacing: 7) {
+                            Text("Press")
+                            ShortcutKeyCapsView(displayString: shortcut)
+                            Text("to start dictating anywhere.")
+                        }
+                    } else {
+                        Text(
+                            "Start dictation from the Timbre menu, or add a shortcut in Settings."
+                        )
+                    }
                 }
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.8))
                 .padding(.top, 10)
                 .accessibilityElement(children: .ignore)
-                .accessibilityIdentifier("setupReadyShortcutHint")
                 .accessibilityLabel(
-                    "Press \(coordinator.shortcutDisplayString) to start dictating anywhere."
+                    coordinator.shortcutDisplayString.map {
+                        "Press \($0) to start dictating anywhere."
+                    } ?? "Start dictation from the Timbre menu, or add a shortcut in Settings."
                 )
+                .accessibilityIdentifier("setupReadyShortcutHint")
             },
             footer: {
                 Button("Done") {

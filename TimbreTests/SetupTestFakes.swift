@@ -223,13 +223,13 @@ final class FakeMicrophonePermission: MicrophonePermissionProviding {
 @Observable
 final class FakeShortcutOnboarding: ShortcutOnboardingProviding {
     private(set) var hasAssignedShortcut: Bool
-    private(set) var displayString: String
+    private(set) var displayString: String?
     private(set) var applyCallCount = 0
     private(set) var refreshCallCount = 0
 
     init(
         hasAssignedShortcut: Bool = true,
-        displayString: String = DictationShortcutName.temporaryDefaultDisplayString
+        displayString: String? = "⌃⇧D"
     ) {
         self.hasAssignedShortcut = hasAssignedShortcut
         self.displayString = displayString
@@ -238,11 +238,7 @@ final class FakeShortcutOnboarding: ShortcutOnboardingProviding {
     func applyRecorderChange(isAssigned: Bool, displayString: String?) {
         applyCallCount += 1
         hasAssignedShortcut = isAssigned
-        if let displayString, !displayString.isEmpty {
-            self.displayString = displayString
-        } else if !isAssigned {
-            self.displayString = DictationShortcutName.temporaryDefaultDisplayString
-        }
+        self.displayString = isAssigned ? displayString : nil
     }
 
     func refreshFromStorage() {

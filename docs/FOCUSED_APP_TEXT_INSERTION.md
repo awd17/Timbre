@@ -5,7 +5,7 @@ Developer notes for Timbre’s Accessibility-gated insertion of completed dictat
 ## Status
 
 - After Stop, Timbre copies the transcript to the pasteboard, then posts Command-V into the captured target when safe.
-- The transcript **always** remains on the clipboard after a successful non-empty transcription.
+- The **Keep transcript on clipboard** setting controls successful insertion and defaults off. Timbre still uses the pasteboard internally.
 - Accessibility permission is **required** for normal production dictation readiness.
 - Automatic insertion uses `NSPasteboard` + `CGEvent` Command-V — not direct AX text replacement.
 - Model prewarming after setup readiness is documented in [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md). Onboarding polish and shortcut customization remain later work.
@@ -20,7 +20,15 @@ Focus a text field in another app
 → Parakeet transcribes
 → Timbre copies transcript
 → Timbre posts Command-V into the captured target (when safe)
-→ text appears at the caret; clipboard still holds the transcript
+→ text appears at the caret; the previous complete clipboard snapshot is restored when safe, or the transcript remains according to Settings/fallback policy
+
+When retention is off, restoration is driven by promised-data consumption.
+After consumption, Timbre allows a bounded 150 ms grace period for editors that
+inspect pasteboard data before committing their paste on a later run-loop turn.
+It then restores all captured item representations only while its tracked
+`changeCount` remains current. Unreadable, changing, or over-64-MiB snapshots
+are not partially restored. A newer clipboard generation always wins; see
+[`SETTINGS.md`](SETTINGS.md) for limitations.
 ```
 
 Copy Again copies only; it never pastes again.

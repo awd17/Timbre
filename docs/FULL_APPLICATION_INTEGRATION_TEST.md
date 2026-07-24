@@ -26,7 +26,7 @@ input. It verifies:
 - production menu controls and real Carbon registration of the isolated
   `⌃⇧K` shortcut;
 - deterministic partial/final transcription, captured TextEdit identity,
-  clipboard output, the Command-V probe, Inserted status, and Copy Again;
+  isolated pasteboard output, the Command-V probe, Inserted status, and Copy Again;
 - busy-state deduplication, menu-bar-only relaunch without rebuilding,
   persisted shortcut/model state, and setup recovery without redownload;
 - safe clipboard fallback for target changes, terminated targets,
@@ -41,7 +41,8 @@ immediately after the next real Carbon key-up.
 
 The test stops at the final Command-V posting boundary. It proves Timbre
 validated the original target and issued the insertion request with the exact
-clipboard text; it does not claim macOS accepted a synthetic paste.
+the isolated pasteboard text; it does not read or overwrite the developer's
+general pasteboard and does not claim macOS accepted a synthetic paste.
 
 ## DEBUG integration runtime
 

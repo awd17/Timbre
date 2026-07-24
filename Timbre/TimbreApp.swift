@@ -12,8 +12,33 @@ struct TimbreApp: App {
         } label: {
             Label("Timbre", systemImage: "waveform")
                 .accessibilityIdentifier("timbreStatusItem")
+                .background(
+                    SettingsOpenActionBridge(
+                        coordinator: appDelegate.settingsOpeningCoordinator
+                    )
+                )
         }
         .menuBarExtraStyle(.window)
+
+        Settings {
+            TimbreSettingsView(
+                preferences: appDelegate.appPreferences,
+                shortcutState: appDelegate.shortcutState,
+                shortcutName: appDelegate.shortcutRecorderName,
+                bundleInformation: BundleInformation(),
+                onClose: {
+                    appDelegate.settingsOpeningCoordinator.settingsWindowWillClose()
+                }
+            )
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    appDelegate.settingsOpeningCoordinator.open()
+                }
+                .keyboardShortcut(",")
+            }
+        }
     }
 }
 
@@ -24,10 +49,18 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let setupCoordinator: SetupCoordinator?
     let prewarmCoordinator: ParakeetPrewarmCoordinator?
     let shortcutCoordinator: DictationShortcutCoordinator
+    let appPreferences: UserDefaultsAppPreferences
+    let dockVisibilityCoordinator: DockVisibilityCoordinator
+    let settingsOpeningCoordinator: SettingsOpeningCoordinator
+    let shortcutState: KeyboardShortcutsOnboardingAdapter
+    let shortcutRecorderName: KeyboardShortcuts.Name
 
     private var debugWindow: NSWindow?
+    #if DEBUG
+    private var debugWindowCloseDelegate: DebugWindowCloseDelegate?
+    #endif
     private var setupWindowController: SetupWindowController?
-    private let shortcutRecorderName: KeyboardShortcuts.Name
+    private var acceptsDockReopenRequests = false
     #if DEBUG
     private let integrationRuntime: IntegrationTestRuntime?
     #endif
@@ -39,6 +72,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             shortcutCoordinator: shortcutCoordinator,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
+            },
+            onOpenSettings: { [weak self] in
+                self?.settingsOpeningCoordinator.open()
             }
         )
     }
@@ -52,8 +88,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         let selectedSetupCoordinator: SetupCoordinator?
         let selectedTranscription: any TranscriptionServicing
         let selectedDelivery: any TranscriptDeliveryServicing
+        let selectedClipboard: any ClipboardServicing
         let selectedShortcutService: any GlobalShortcutServicing
         let selectedShortcutName: KeyboardShortcuts.Name
+        let selectedShortcutState: KeyboardShortcutsOnboardingAdapter
         let shouldConfigurePrewarm: Bool
         let isProductionBackendForPrewarm: Bool
 
@@ -65,6 +103,16 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         let integrationRuntime = integrationConfiguration.map(IntegrationTestRuntime.init)
         self.integrationRuntime = integrationRuntime
         #endif
+
+        let selectedAppPreferences = UserDefaultsAppPreferences(
+            defaults: {
+                #if DEBUG
+                integrationRuntime?.defaults ?? .standard
+                #else
+                .standard
+                #endif
+            }()
+        )
 
         #if DEBUG
         if let integrationRuntime {
@@ -83,21 +131,29 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 featureEnabled: true
             )
             selectedTranscription = integrationRuntime.transcription
-            selectedDelivery = integrationRuntime.makeDelivery(targetProvider: targetProvider)
+            selectedDelivery = integrationRuntime.makeDelivery(
+                targetProvider: targetProvider,
+                preferences: selectedAppPreferences
+            )
+            selectedClipboard = integrationRuntime.clipboard
             selectedShortcutService = integrationRuntime.shortcutService
             selectedShortcutName = integrationRuntime.shortcutName
+            selectedShortcutState = integrationRuntime.shortcutOnboarding
             shouldConfigurePrewarm = true
             isProductionBackendForPrewarm = true
         } else {
             let productionModelManager = ParakeetModelManager()
             let liveAccessibility = AccessibilityPermissionService()
             let setupEnabled = TimbreSetupFeature.isEnabled(arguments: arguments)
+            let shortcutState = KeyboardShortcutsOnboardingAdapter()
             selectedModelManager = productionModelManager
             selectedSetupCoordinator = setupEnabled
                 ? SetupCoordinator(
                     modelManager: productionModelManager,
                     microphone: MicrophonePermissionService(),
                     accessibility: liveAccessibility,
+                    preferences: UserDefaultsOnboardingPreferences(),
+                    shortcutOnboarding: shortcutState,
                     featureEnabled: true
                 )
                 : nil
@@ -108,10 +164,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             selectedDelivery = Self.makeTranscriptDelivery(
                 arguments: arguments,
                 targetProvider: targetProvider,
-                accessibility: liveAccessibility
+                accessibility: liveAccessibility,
+                preferences: selectedAppPreferences
             )
+            selectedClipboard = ClipboardService()
             selectedShortcutService = KeyboardShortcutsGlobalShortcutService()
             selectedShortcutName = .toggleDictation
+            selectedShortcutState = shortcutState
             shouldConfigurePrewarm = selectedSetupCoordinator != nil
             isProductionBackendForPrewarm = Self.isProductionParakeetBackend(
                 arguments: arguments
@@ -120,11 +179,14 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         #else
         let productionModelManager = ParakeetModelManager()
         let liveAccessibility = AccessibilityPermissionService()
+        let shortcutState = KeyboardShortcutsOnboardingAdapter()
         selectedModelManager = productionModelManager
         selectedSetupCoordinator = SetupCoordinator(
             modelManager: productionModelManager,
             microphone: MicrophonePermissionService(),
             accessibility: liveAccessibility,
+            preferences: UserDefaultsOnboardingPreferences(),
+            shortcutOnboarding: shortcutState,
             featureEnabled: true
         )
         selectedTranscription = Self.makeTranscriptionService(
@@ -133,10 +195,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         selectedDelivery = FocusedApplicationTextOutputService(
             accessibility: liveAccessibility,
-            targetProvider: targetProvider
+            targetProvider: targetProvider,
+            preferences: selectedAppPreferences
         )
+        selectedClipboard = ClipboardService()
         selectedShortcutService = KeyboardShortcutsGlobalShortcutService()
         selectedShortcutName = .toggleDictation
+        selectedShortcutState = shortcutState
         shouldConfigurePrewarm = true
         isProductionBackendForPrewarm = true
         #endif
@@ -144,8 +209,18 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         modelManager = selectedModelManager
         setupCoordinator = selectedSetupCoordinator
         shortcutRecorderName = selectedShortcutName
+        self.shortcutState = selectedShortcutState
+        appPreferences = selectedAppPreferences
+        let dockVisibilityCoordinator = DockVisibilityCoordinator(
+            preferences: selectedAppPreferences
+        )
+        self.dockVisibilityCoordinator = dockVisibilityCoordinator
+        settingsOpeningCoordinator = SettingsOpeningCoordinator(
+            dockVisibilityCoordinator: dockVisibilityCoordinator
+        )
         controller = AssistantController(
             transcription: selectedTranscription,
+            clipboard: selectedClipboard,
             delivery: selectedDelivery,
             targetProvider: targetProvider
         )
@@ -183,14 +258,15 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         Self.applyBundledApplicationIcon()
+        if setupCoordinator?.shouldAutoPresent == true {
+            dockVisibilityCoordinator.beginTemporaryPresentation(.onboarding)
+        }
         #if DEBUG
         if Self.wantsDebugWindow || integrationRuntime?.configuration.showsMenuHost == true {
-            NSApp.setActivationPolicy(.regular)
+            dockVisibilityCoordinator.beginTemporaryPresentation(.debugWindow)
         }
         #endif
-        if setupCoordinator?.shouldAutoPresent == true {
-            NSApp.setActivationPolicy(.regular)
-        }
+        dockVisibilityCoordinator.applyLaunchPolicy()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -213,6 +289,14 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         prewarmCoordinator?.evaluate(source: .launchReadiness)
+
+        Task { @MainActor [weak self] in
+            // LaunchServices (including Xcode Run) can send a reopen while it
+            // activates a newly launched accessory app. Only later Dock
+            // reopens should present Settings.
+            await Task.yield()
+            self?.acceptsDockReopenRequests = true
+        }
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -228,21 +312,41 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateNow
     }
 
+    func applicationShouldHandleReopen(
+        _ sender: NSApplication,
+        hasVisibleWindows flag: Bool
+    ) -> Bool {
+        guard Self.shouldOpenSettingsForReopen(
+            acceptsDockReopenRequests: acceptsDockReopenRequests,
+            showInDock: appPreferences.showInDock
+        ) else {
+            return false
+        }
+        settingsOpeningCoordinator.open()
+        return true
+    }
+
+    func applicationShouldSaveSecureApplicationState(_ app: NSApplication) -> Bool {
+        false
+    }
+
+    func applicationShouldRestoreSecureApplicationState(_ app: NSApplication) -> Bool {
+        false
+    }
+
+    static func shouldOpenSettingsForReopen(
+        acceptsDockReopenRequests: Bool,
+        showInDock: Bool
+    ) -> Bool {
+        acceptsDockReopenRequests && showInDock
+    }
+
     func presentSetupWindow() {
         guard let setupCoordinator else { return }
         if setupWindowController == nil {
             setupWindowController = SetupWindowController(
                 coordinator: setupCoordinator,
-                shouldRestoreAccessory: { [weak self] in
-                    #if DEBUG
-                    if Self.wantsDebugWindow
-                        || self?.integrationRuntime?.configuration.showsMenuHost == true
-                    {
-                        return false
-                    }
-                    #endif
-                    return self?.debugWindow?.isVisible != true
-                },
+                dockVisibilityCoordinator: dockVisibilityCoordinator,
                 shortcutRecorderName: shortcutRecorderName
             )
         }
@@ -306,7 +410,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     private static func makeTranscriptDelivery(
         arguments: [String],
         targetProvider: any DictationTargetProviding,
-        accessibility: any AccessibilityPermissionProviding
+        accessibility: any AccessibilityPermissionProviding,
+        preferences: any AppPreferencesProviding
     ) -> any TranscriptDeliveryServicing {
         #if DEBUG
         let isDebug = true
@@ -319,7 +424,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
         return FocusedApplicationTextOutputService(
             accessibility: accessibility,
-            targetProvider: targetProvider
+            targetProvider: targetProvider,
+            preferences: preferences
         )
     }
 
@@ -409,14 +515,39 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = wantsIntegrationHost ? "Timbre Integration Menu" : "Timbre Debug"
+        let closeDelegate = DebugWindowCloseDelegate { [weak self, weak window] in
+            guard let self, self.debugWindow === window else { return }
+            self.debugWindow = nil
+            self.debugWindowCloseDelegate = nil
+            self.dockVisibilityCoordinator.endTemporaryPresentation(.debugWindow)
+        }
+        window.delegate = closeDelegate
         window.contentView = NSHostingView(
             rootView: menuContent
                 .frame(minWidth: 320, minHeight: 240)
         )
         window.center()
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        dockVisibilityCoordinator.activate()
         debugWindow = window
+        debugWindowCloseDelegate = closeDelegate
     }
     #endif
 }
+
+#if DEBUG
+@MainActor
+final class DebugWindowCloseDelegate: NSObject, NSWindowDelegate {
+    private var onClose: (() -> Void)?
+
+    init(onClose: @escaping () -> Void) {
+        self.onClose = onClose
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        let action = onClose
+        onClose = nil
+        action?()
+    }
+}
+#endif

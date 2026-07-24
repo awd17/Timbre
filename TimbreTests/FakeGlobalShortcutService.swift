@@ -7,7 +7,7 @@ final class FakeGlobalShortcutService: GlobalShortcutServicing {
     private(set) var stopCount = 0
     private(set) var handler: (() -> Void)?
     var isListening = false
-    var displayString = "⌃⇧D"
+    var displayString: String? = "⌃⇧D"
 
     func start() {
         startCount += 1

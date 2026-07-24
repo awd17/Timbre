@@ -1,10 +1,13 @@
 import SwiftUI
 
 struct MenuBarDictationView: View {
+    @Environment(\.dismiss) private var dismiss
+
     var controller: AssistantController
     var setupCoordinator: SetupCoordinator?
     var shortcutCoordinator: DictationShortcutCoordinator?
     var onOpenSetup: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
 
     var body: some View {
         Group {
@@ -53,8 +56,13 @@ struct MenuBarDictationView: View {
             }
 
             HStack {
+                Button("Settings…") {
+                    openSettings()
+                }
+                .accessibilityIdentifier("settingsButton")
+
                 Spacer()
-                Button("Quit") {
+                Button("Quit Timbre") {
                     controller.quit()
                 }
                 .accessibilityIdentifier("quitButton")
@@ -126,11 +134,26 @@ struct MenuBarDictationView: View {
 
                 Spacer()
 
-                Button("Quit") {
+                Button("Settings…") {
+                    openSettings()
+                }
+                .accessibilityIdentifier("settingsButton")
+
+                Button("Quit Timbre") {
                     controller.quit()
                 }
                 .accessibilityIdentifier("quitButton")
             }
+        }
+    }
+
+    private func openSettings() {
+        dismiss()
+        Task { @MainActor in
+            // Let MenuBarExtra finish closing its transient window before
+            // activating and focusing the Settings scene.
+            await Task.yield()
+            onOpenSettings?()
         }
     }
 
