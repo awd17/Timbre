@@ -27,6 +27,9 @@ struct ModelPreparationProgress: Equatable {
 
     var percentText: String? {
         guard let fraction else { return nil }
+        if fraction > 0, fraction < 0.01 {
+            return "<1%"
+        }
         let percent = Int((fraction * 100).rounded(.down).clamped(to: 0...99))
         return "\(percent)%"
     }

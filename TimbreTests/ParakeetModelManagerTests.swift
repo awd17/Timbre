@@ -151,6 +151,63 @@ private final class FakeParakeetModelLoader: ParakeetModelLoading {
 
 @MainActor
 final class ParakeetModelManagerTests: XCTestCase {
+    func testDownloadProgressUsesRepositoryByteFraction() {
+        XCTAssertEqual(
+            ParakeetModelManager.overallDownloadFraction(rawFraction: 0.5),
+            0.425,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            ParakeetModelManager.overallDownloadFraction(rawFraction: 1),
+            0.85,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testDownloadProgressRemovesFluidAudioCompileReservation() {
+        let halfwayThroughNetworkTransfer = DownloadProgress(
+            fractionCompleted: 0.25,
+            phase: .downloading(completedFiles: 0, totalFiles: 1)
+        )
+        let compiling = DownloadProgress(
+            fractionCompleted: 0.5,
+            phase: .compiling(modelName: "Encoder.mlmodelc")
+        )
+
+        XCTAssertEqual(
+            ParakeetModelManager.normalizedPassFraction(halfwayThroughNetworkTransfer),
+            0.5
+        )
+        XCTAssertEqual(
+            ParakeetModelManager.normalizedPassFraction(compiling),
+            1
+        )
+    }
+
+    func testDownloadETARemainsHiddenUntilRateIsCredible() {
+        XCTAssertNil(
+            ParakeetModelManager.estimatedRemaining(
+                overallFraction: 0.09,
+                elapsed: 120
+            )
+        )
+        XCTAssertNil(
+            ParakeetModelManager.estimatedRemaining(
+                overallFraction: 0.20,
+                elapsed: 29
+            )
+        )
+    }
+
+    func testDownloadETAUsesOverallProgress() {
+        let remaining = ParakeetModelManager.estimatedRemaining(
+            overallFraction: 0.10,
+            elapsed: 40
+        )
+
+        XCTAssertEqual(remaining, 360)
+    }
+
     func testPrewarmRechecksLoadFlightAfterInstallWait() async throws {
         let loader = FakeParakeetModelLoader(cacheExists: false)
         loader.suspendsDownload = true
