@@ -27,9 +27,9 @@ The UI and the controller do not depend on a specific speech engine.
 ### Complete
 
 - Menu-bar-only app with `MenuBarExtra` and `LSUIElement`
-- Start and stop dictation from the menu UI
+- Native compact menu with Settings, Copy Last Dictation, and Quit
 - Parakeet batch transcription after Stop (production default)
-- Copy to clipboard and Copy Again
+- Copy to clipboard and Copy Last Dictation
 - **Focused-app text insertion** via clipboard + Command-V (Accessibility required)
 - Microphone permission for the production path
 - Accessibility permission for text insertion
@@ -51,7 +51,6 @@ The UI and the controller do not depend on a specific speech engine.
 ### Not started / out of this milestone
 
 - Live Parakeet partial transcription / streaming / VAD / auto-stop
-- Menu-bar popover redesign (next)
 - Floating dictation indicator (later)
 - Floating panel
 - Read or replace selected text
@@ -139,7 +138,7 @@ Timbre/
   Testing/
     IntegrationTestRuntime.swift       DEBUG persistent fake boundaries + JSON probe
   Fixtures/parakeet-smoke-test.wav
-  Views/MenuBarDictationView.swift
+  Views/MenuBarMenuView.swift
   Assets.xcassets/OnboardingBackground.imageset/
 Tools/ParakeetSmokeTest/
   Sources/                        Developer CLI

@@ -29,7 +29,7 @@ final class AssistantController {
     var statusMessage: String { sessionState.statusMessage }
     var canStart: Bool { sessionState.canStart }
     var canStop: Bool { sessionState.canStop }
-    var canCopyAgain: Bool { lastCompletedTranscript != nil }
+    var canCopyLastTranscript: Bool { lastCompletedTranscript != nil }
 
     func startDictation() async {
         guard canStart else { return }

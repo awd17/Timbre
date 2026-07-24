@@ -16,24 +16,14 @@ struct TimbreSettingsView: View {
                         KeyboardShortcuts.Recorder(
                             for: shortcutName,
                             onChange: { shortcut in
-                                shortcutState.applyRecorderChange(
-                                    isAssigned: shortcut != nil,
-                                    displayString: shortcut?.description
-                                )
+                                shortcutState.applySettingsRecorderChange(shortcut)
                             }
                         )
-                        if !shortcutState.hasAssignedShortcut {
-                            Text("Not set")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
                     }
                 } label: {
                     settingLabel(
                         "Dictation Shortcut",
-                        help: shortcutState.hasAssignedShortcut
-                            ? "Use this shortcut to start and stop dictation from anywhere."
-                            : "Use the menu to start and stop dictation."
+                        help: "Required to start and stop dictation from anywhere."
                     )
                 }
                 .accessibilityIdentifier("settingsDictationShortcut")
@@ -73,11 +63,15 @@ struct TimbreSettingsView: View {
         .frame(minWidth: 460, idealWidth: 500, maxWidth: 560)
         .fixedSize(horizontal: false, vertical: true)
         .background(
-            SettingsWindowLifecycleObserver(onClose: onClose)
+            SettingsWindowLifecycleObserver {
+                shortcutState.finishSettingsShortcutEditing()
+                onClose()
+            }
                 .frame(width: 0, height: 0)
         )
         .onAppear {
             shortcutState.refreshFromStorage()
+            shortcutState.beginSettingsShortcutEditing()
         }
     }
 

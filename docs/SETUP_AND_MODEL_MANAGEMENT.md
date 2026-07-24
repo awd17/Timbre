@@ -20,7 +20,7 @@ The global dictation shortcut respects the same readiness gates: it will not sta
 ## Architecture
 
 ```text
-SetupFlowView / MenuBarDictationView
+SetupFlowView / MenuBarMenuView
         → SetupCoordinator
               → MicrophonePermissionProviding
               → AccessibilityPermissionProviding
@@ -67,7 +67,12 @@ Session cancel and closing the setup window do **not** cancel preparation.
 
 ### Dictation while setup is incomplete
 
-When setup is enabled and the model is not installed, still downloading, the microphone is not granted, or Accessibility is not trusted, the menu-bar popover shows a setup-only surface: no transcript, no Start. Open the setup window from **Finish Setup…** / **Getting Ready…** / **Setup Failed — Try Again…**. After the component is installed and both permissions are granted, normal dictation controls return without relaunching.
+When setup is incomplete, the native menu adds one temporary recovery command:
+**Finish Setup…**, **Getting Ready…**, or **Setup Failed — Try Again…**. The
+normal Settings, Copy Last Dictation, and Quit commands remain available.
+Dictation itself is shortcut-only, and readiness requires an assigned shortcut.
+After readiness is restored, the temporary setup command disappears without a
+relaunch.
 
 `applicationDidBecomeActive` refreshes cache, microphone, and Accessibility trust so revoke/re-grant and deleted caches update the menu while Timbre stays open.
 

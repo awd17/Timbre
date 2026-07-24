@@ -240,6 +240,95 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
         XCTAssertEqual(global.displayString, "⌃⇧K")
     }
 
+    func testSettingsClearRestoresPreviousShortcutWhenEditingEnds() {
+        let previous = KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift])
+        KeyboardShortcuts.setShortcut(previous, for: .integrationTestToggleDictation)
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+
+        KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
+        adapter.applySettingsRecorderChange(nil)
+        XCTAssertTrue(adapter.hasAssignedShortcut)
+        XCTAssertEqual(adapter.displayString, "⌃⇧K")
+
+        adapter.refreshFromStorage()
+        XCTAssertTrue(adapter.hasAssignedShortcut)
+        XCTAssertEqual(adapter.displayString, "⌃⇧K")
+
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            previous
+        )
+        XCTAssertTrue(adapter.hasAssignedShortcut)
+        XCTAssertEqual(adapter.displayString, "⌃⇧K")
+    }
+
+    func testSettingsReplacementBecomesNextRollbackShortcut() {
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift]),
+            for: .integrationTestToggleDictation
+        )
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+        let replacement = KeyboardShortcuts.Shortcut(.j, modifiers: [.command, .shift])
+        KeyboardShortcuts.setShortcut(replacement, for: .integrationTestToggleDictation)
+        adapter.applySettingsRecorderChange(replacement)
+
+        KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
+        adapter.applySettingsRecorderChange(nil)
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            replacement
+        )
+        XCTAssertEqual(adapter.displayString, "⇧⌘J")
+    }
+
+    func testSetupReplacementBecomesSettingsRollbackShortcut() {
+        KeyboardShortcuts.setShortcut(
+            KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift]),
+            for: .integrationTestToggleDictation
+        )
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+
+        let replacement = KeyboardShortcuts.Shortcut(.j, modifiers: [.command, .shift])
+        KeyboardShortcuts.setShortcut(replacement, for: .integrationTestToggleDictation)
+        adapter.applyRecorderChange(isAssigned: true, displayString: replacement.description)
+
+        KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
+        adapter.applySettingsRecorderChange(nil)
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            replacement
+        )
+    }
+
+    func testSettingsUsesRecommendedShortcutWhenNoRollbackExists() {
+        KeyboardShortcuts.setShortcut(nil, for: .integrationTestToggleDictation)
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            DictationShortcutName.recommendedShortcut
+        )
+    }
+
     func testIntegrationBurstInvokesTheRegisteredHandlerWithoutHIDPosting() {
         let service = KeyboardShortcutsGlobalShortcutService(
             name: .integrationTestToggleDictation

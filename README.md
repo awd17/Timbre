@@ -54,8 +54,12 @@ full-application UI lifecycle without rebuilding. See
 
 In Xcode, press ⌘R (Debug), or launch a Release build of `Timbre.app`.  
 On first launch (when setup is incomplete), complete onboarding: welcome → choose shortcut → microphone → text insertion → download/verify → Done.
-Open the waveform status item, or use your chosen global shortcut to Start/Stop without opening the menu.  
-Use Start, Stop, Copy Again, Settings, or Quit in the menu. Settings includes the shared dictation shortcut, Dock visibility (off by default), clipboard retention (off by default), and version information. See [`docs/SETTINGS.md`](docs/SETTINGS.md).
+Use your required global shortcut to start and stop dictation. Open the waveform
+status item for the native compact menu: **Settings…**, **Copy Last Dictation**,
+and **Quit Timbre**. A temporary setup command appears above them only when
+onboarding or recovery is required. Settings includes the shared dictation
+shortcut, Dock visibility (off by default), clipboard retention (off by default),
+and version information. See [`docs/SETTINGS.md`](docs/SETTINGS.md).
 
 The temporary default shortcut is **⌃⇧D** until you change it in onboarding. See [`docs/ONBOARDING_UX.md`](docs/ONBOARDING_UX.md) and [`docs/GLOBAL_DICTATION_SHORTCUT.md`](docs/GLOBAL_DICTATION_SHORTCUT.md).
 
