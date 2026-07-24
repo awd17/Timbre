@@ -56,6 +56,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let shortcutRecorderName: KeyboardShortcuts.Name
 
     private var debugWindow: NSWindow?
+    #if DEBUG
+    private var debugWindowCloseDelegate: DebugWindowCloseDelegate?
+    #endif
     private var setupWindowController: SetupWindowController?
     #if DEBUG
     private let integrationRuntime: IntegrationTestRuntime?
@@ -282,8 +285,6 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
             presentSetupWindow()
-        } else if appPreferences.showInDock {
-            settingsOpeningCoordinator.open()
         }
 
         prewarmCoordinator?.evaluate(source: .launchReadiness)
@@ -484,6 +485,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         window.title = wantsIntegrationHost ? "Timbre Integration Menu" : "Timbre Debug"
+        let closeDelegate = DebugWindowCloseDelegate { [weak self, weak window] in
+            guard let self, self.debugWindow === window else { return }
+            self.debugWindow = nil
+            self.debugWindowCloseDelegate = nil
+            self.dockVisibilityCoordinator.endTemporaryPresentation(.debugWindow)
+        }
+        window.delegate = closeDelegate
         window.contentView = NSHostingView(
             rootView: menuContent
                 .frame(minWidth: 320, minHeight: 240)
@@ -492,6 +500,24 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         dockVisibilityCoordinator.activate()
         debugWindow = window
+        debugWindowCloseDelegate = closeDelegate
     }
     #endif
 }
+
+#if DEBUG
+@MainActor
+final class DebugWindowCloseDelegate: NSObject, NSWindowDelegate {
+    private var onClose: (() -> Void)?
+
+    init(onClose: @escaping () -> Void) {
+        self.onClose = onClose
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        let action = onClose
+        onClose = nil
+        action?()
+    }
+}
+#endif

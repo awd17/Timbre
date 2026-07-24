@@ -185,6 +185,24 @@ final class BundleInformationTests: XCTestCase {
     }
 }
 
+#if DEBUG
+@MainActor
+final class DebugWindowCloseDelegateTests: XCTestCase {
+    func testCloseReleasesPresentationExactlyOnce() {
+        var closeCount = 0
+        let delegate = DebugWindowCloseDelegate {
+            closeCount += 1
+        }
+        let notification = Notification(name: NSWindow.willCloseNotification)
+
+        delegate.windowWillClose(notification)
+        delegate.windowWillClose(notification)
+
+        XCTAssertEqual(closeCount, 1)
+    }
+}
+#endif
+
 @MainActor
 final class TranscriptPasteboardServiceTests: XCTestCase {
     func testConsumedTranscriptRestoresAllPreviousRepresentations() async {
