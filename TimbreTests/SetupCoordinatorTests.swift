@@ -695,4 +695,14 @@ final class ModelPreparationStateTests: XCTestCase {
         XCTAssertEqual(progress.percentText, "40%")
         XCTAssertEqual(progress.estimatedTimeRemainingText, "About 3 minutes remaining")
     }
+
+    func testProgressShowsSubOnePercentWithoutLookingStopped() {
+        let progress = ModelPreparationProgress(
+            fraction: 0.005,
+            detail: "Downloading…",
+            estimatedSecondsRemaining: nil
+        )
+
+        XCTAssertEqual(progress.percentText, "<1%")
+    }
 }

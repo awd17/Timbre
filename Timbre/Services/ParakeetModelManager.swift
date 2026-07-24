@@ -9,9 +9,9 @@ import Foundation
 @Observable
 final class ParakeetModelManager: ParakeetModelManaging {
     private static let modelVersion: AsrModelVersion = .v2
-    /// v2 download loops one ModelHub pass per Core ML package (preprocessor/encoder/decoder/joint).
-    private static let expectedDownloadPasses = 4
     private static let downloadStageWeight = 0.85
+    private static let minimumETAFraction = 0.10
+    private static let minimumETAElapsed: TimeInterval = 30
     private static let userFacingFailure =
         "Something went wrong while getting Timbre ready."
 
@@ -25,8 +25,6 @@ final class ParakeetModelManager: ParakeetModelManaging {
     private var nextLoadFlightID = 0
 
     private var progressStartedAt: Date?
-    private var downloadPassIndex = 0
-    private var lastRawFraction = 0.0
     private var peakOverallFraction = 0.0
     private var progressStage: ProgressStage = .download
 
@@ -263,7 +261,6 @@ final class ParakeetModelManager: ParakeetModelManaging {
 
             state = .loading
             progressStage = .load
-            resetProgressForLoadStage()
             do {
                 _ = try await loader.loadCached(progressHandler: makeProgressHandler())
             } catch {
@@ -366,7 +363,6 @@ final class ParakeetModelManager: ParakeetModelManaging {
 
         state = .loading
         progressStage = .load
-        resetProgressForLoadStage()
         do {
             return try await loader.loadCached(progressHandler: makeProgressHandler())
         } catch {
@@ -491,15 +487,8 @@ final class ParakeetModelManager: ParakeetModelManaging {
         }
     }
 
-    private func resetProgressForLoadStage() {
-        downloadPassIndex = 0
-        lastRawFraction = 0
-    }
-
     private func beginProgressTracking() {
         progressStartedAt = Date()
-        downloadPassIndex = 0
-        lastRawFraction = 0
         peakOverallFraction = 0
         progress = ModelPreparationProgress(
             fraction: 0,
@@ -509,20 +498,16 @@ final class ParakeetModelManager: ParakeetModelManaging {
     }
 
     private func applyFluidAudioProgress(_ downloadProgress: DownloadProgress) {
-        let raw = min(max(downloadProgress.fractionCompleted, 0), 1)
-
-        // Each ModelHub pass reports its own 0...1; detect resets to advance pass index.
-        if raw + 0.08 < lastRawFraction {
-            downloadPassIndex = min(downloadPassIndex + 1, Self.expectedDownloadPasses - 1)
-        }
-        lastRawFraction = raw
+        let raw = Self.normalizedPassFraction(downloadProgress)
 
         let overall: Double
         switch progressStage {
         case .download:
-            let passCount = Double(Self.expectedDownloadPasses)
-            let within = (Double(downloadPassIndex) + raw) / passCount
-            overall = Self.downloadStageWeight * min(within, 1)
+            // FluidAudio's first ModelHub operation downloads the repository's
+            // complete required-model set and reports byte-weighted progress.
+            // Later operations reuse that cache, so peakOverallFraction keeps
+            // their listing/compile callbacks from moving the UI backwards.
+            overall = Self.overallDownloadFraction(rawFraction: raw)
         case .load:
             overall = Self.downloadStageWeight + (1 - Self.downloadStageWeight) * raw
         }
@@ -555,9 +540,42 @@ final class ParakeetModelManager: ParakeetModelManaging {
 
     private func estimatedRemaining(overallFraction: Double) -> TimeInterval? {
         guard let started = progressStartedAt else { return nil }
-        guard overallFraction >= 0.03 else { return nil }
         let elapsed = Date().timeIntervalSince(started)
-        guard elapsed >= 2 else { return nil }
+        return Self.estimatedRemaining(
+            overallFraction: overallFraction,
+            elapsed: elapsed
+        )
+    }
+
+    static func overallDownloadFraction(rawFraction: Double) -> Double {
+        let safeRaw = min(max(rawFraction, 0), 1)
+        return downloadStageWeight * safeRaw
+    }
+
+    static func normalizedPassFraction(_ progress: DownloadProgress) -> Double {
+        switch progress.phase {
+        case .listing:
+            return 0
+        case .downloading:
+            // FluidAudio reserves 0.5...1.0 for Core ML compilation even though
+            // compilation is typically sub-second and the transfer takes minutes.
+            // Its live byte fraction therefore occupies 0...0.5; expand that range
+            // so elapsed-time extrapolation reflects actual network completion.
+            return min(max(progress.fractionCompleted / 0.5, 0), 1)
+        case .compiling:
+            return 1
+        }
+    }
+
+    static func estimatedRemaining(
+        overallFraction: Double,
+        elapsed: TimeInterval
+    ) -> TimeInterval? {
+        // Network startup, repository listing, and the tiny preprocessor pass make
+        // the first samples unrepresentative. Do not promise an ETA until the large
+        // encoder has made material progress for long enough to establish a rate.
+        guard overallFraction >= minimumETAFraction else { return nil }
+        guard elapsed >= minimumETAElapsed else { return nil }
         let remaining = elapsed * (1 - overallFraction) / overallFraction
         guard remaining.isFinite, remaining > 0 else { return nil }
         return remaining
