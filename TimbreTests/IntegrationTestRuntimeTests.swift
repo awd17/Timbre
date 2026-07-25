@@ -329,6 +329,27 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
         )
     }
 
+    func testResetFromOpenSettingsCannotRestorePreResetShortcutOnClose() {
+        let previous = KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift])
+        KeyboardShortcuts.setShortcut(previous, for: .integrationTestToggleDictation)
+        let adapter = KeyboardShortcutsOnboardingAdapter(
+            name: .integrationTestToggleDictation
+        )
+        adapter.beginSettingsShortcutEditing()
+
+        adapter.resetSettingsShortcutToDefault()
+        adapter.finishSettingsShortcutEditing()
+
+        XCTAssertEqual(
+            KeyboardShortcuts.getShortcut(for: .integrationTestToggleDictation),
+            DictationShortcutName.recommendedShortcut
+        )
+        XCTAssertEqual(
+            adapter.displayString,
+            DictationShortcutName.recommendedShortcut.description
+        )
+    }
+
     func testIntegrationBurstInvokesTheRegisteredHandlerWithoutHIDPosting() {
         let service = KeyboardShortcutsGlobalShortcutService(
             name: .integrationTestToggleDictation

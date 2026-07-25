@@ -184,6 +184,12 @@ final class CoreAudioOutputHardware: AudioOutputHardwareProviding {
 private struct PlaybackRestorationRecord: Codable, Equatable {
     let deviceUID: String
     let originalVolume: Float?
+    /// The scalar requested before Core Audio reports the device's actual value.
+    ///
+    /// This remains separate from `appliedVolume` because hardware may quantize
+    /// a requested scalar. It also makes the on-disk record crash-safe across
+    /// the small interval between the write and its read-back.
+    let requestedVolume: Float?
     let appliedVolume: Float?
     let originalMute: Bool?
     let appliedMute: Bool?
@@ -196,6 +202,8 @@ final class DictationPlaybackController:
 {
     static let restorationRecordsKey = "timbre.playbackRestorationRecords"
     static let loweredVolumeFactor: Float = 0.25
+    private static let appliedValueTolerance: Float = 0.002
+    private static let pendingWriteTolerance: Float = 0.05
 
     @Published private(set) var isCurrentOutputControllable = true
 
@@ -269,7 +277,6 @@ final class DictationPlaybackController:
         }
 
         let mode = activePlaybackMode ?? preferences.playbackDuringDictation
-        let record: PlaybackRestorationRecord
         switch mode {
         case .keepUnchanged:
             isCurrentOutputControllable = true
@@ -288,62 +295,195 @@ final class DictationPlaybackController:
                 0,
                 min(1, originalVolume * Self.loweredVolumeFactor)
             )
-            record = PlaybackRestorationRecord(
-                deviceUID: device.uid,
-                originalVolume: originalVolume,
-                appliedVolume: appliedVolume,
-                originalMute: nil,
-                appliedMute: nil
+            applyVolume(
+                appliedVolume,
+                startingAt: originalVolume,
+                mode: mode,
+                device: device
             )
         case .mute:
             if hardware.canSetMute(of: device),
                let originalMute = hardware.mute(of: device)
             {
-                record = PlaybackRestorationRecord(
-                    deviceUID: device.uid,
-                    originalVolume: nil,
-                    appliedVolume: nil,
-                    originalMute: originalMute,
-                    appliedMute: true
-                )
-            } else if hardware.canSetVolume(of: device),
-                      let originalVolume = hardware.volume(of: device)
+                if applyMute(startingAt: originalMute, device: device) {
+                    return
+                }
+            }
+            if hardware.canSetVolume(of: device),
+               let originalVolume = hardware.volume(of: device)
             {
-                record = PlaybackRestorationRecord(
-                    deviceUID: device.uid,
-                    originalVolume: originalVolume,
-                    appliedVolume: 0,
-                    originalMute: nil,
-                    appliedMute: nil
+                applyVolume(
+                    0,
+                    startingAt: originalVolume,
+                    mode: mode,
+                    device: device
                 )
             } else {
                 reportUnsupported(
                     "current output cannot be muted in software; leaving playback unchanged."
                 )
-                return
             }
         }
+    }
 
-        upsert(record)
-        let status: OSStatus
-        if let appliedMute = record.appliedMute {
-            status = hardware.setMute(appliedMute, of: device)
-        } else if let appliedVolume = record.appliedVolume {
-            status = hardware.setVolume(appliedVolume, of: device)
-        } else {
-            status = noErr
+    private func applyVolume(
+        _ requestedVolume: Float,
+        startingAt originalVolume: Float,
+        mode: PlaybackDuringDictation,
+        device: AudioOutputDevice
+    ) {
+        if approximatelyEqual(originalVolume, requestedVolume) {
+            markApplied(to: device)
+            return
         }
 
+        // Persist before changing the device so an unexpected termination can
+        // still restore the starting scalar.
+        let pendingRecord = PlaybackRestorationRecord(
+            deviceUID: device.uid,
+            originalVolume: originalVolume,
+            requestedVolume: requestedVolume,
+            appliedVolume: nil,
+            originalMute: nil,
+            appliedMute: nil
+        )
+        upsert(pendingRecord)
+        let status = hardware.setVolume(requestedVolume, of: device)
         guard status == noErr else {
-            removeRecord(for: device.uid)
-            isCurrentOutputControllable = false
-            TimbreLog.line(
-                "Timbre playback: failed to apply \(mode.title.lowercased()) mode (Core Audio \(status))."
+            resolveFailedVolumeWrite(
+                pendingRecord,
+                device: device,
+                status: status,
+                mode: mode
             )
             return
         }
+
+        guard let actualVolume = hardware.volume(of: device) else {
+            // The device exposed a scalar before the write but stopped
+            // reporting it afterward. Restore best-effort and do not claim
+            // that attenuation is active.
+            _ = hardware.setVolume(originalVolume, of: device)
+            removeRecord(for: device.uid)
+            reportApplyFailure(mode: mode, status: nil)
+            return
+        }
+
+        guard actualVolume <= originalVolume + Self.appliedValueTolerance else {
+            // Never leave playback louder than it began if a driver behaves
+            // unexpectedly.
+            _ = hardware.setVolume(originalVolume, of: device)
+            removeRecord(for: device.uid)
+            reportApplyFailure(mode: mode, status: nil)
+            return
+        }
+
+        if approximatelyEqual(actualVolume, originalVolume) {
+            removeRecord(for: device.uid)
+            reportApplyFailure(mode: mode, status: nil)
+            return
+        } else {
+            // Store the read-back scalar, not the request. Many output devices
+            // quantize their volume controls, and restoration must compare
+            // against what the device actually applied.
+            upsert(
+                PlaybackRestorationRecord(
+                    deviceUID: device.uid,
+                    originalVolume: originalVolume,
+                    requestedVolume: requestedVolume,
+                    appliedVolume: actualVolume,
+                    originalMute: nil,
+                    appliedMute: nil
+                )
+            )
+        }
+        markApplied(to: device)
+    }
+
+    private func applyMute(
+        startingAt originalMute: Bool,
+        device: AudioOutputDevice
+    ) -> Bool {
+        if originalMute {
+            markApplied(to: device)
+            return true
+        }
+
+        let record = PlaybackRestorationRecord(
+            deviceUID: device.uid,
+            originalVolume: nil,
+            requestedVolume: nil,
+            appliedVolume: nil,
+            originalMute: originalMute,
+            appliedMute: true
+        )
+        upsert(record)
+        let status = hardware.setMute(true, of: device)
+        let appliedMute = hardware.mute(of: device)
+        guard status == noErr, appliedMute == true else {
+            if appliedMute == true {
+                // A driver may report an error after applying the write. Keep
+                // the record so Stop can still restore it.
+                markApplied(to: device)
+                return true
+            } else {
+                // A nominally writable mute control can still reject a write.
+                // Put it back best-effort, then let the caller try volume zero.
+                if appliedMute == nil {
+                    _ = hardware.setMute(originalMute, of: device)
+                }
+                removeRecord(for: device.uid)
+                return false
+            }
+        }
+        markApplied(to: device)
+        return true
+    }
+
+    private func resolveFailedVolumeWrite(
+        _ pendingRecord: PlaybackRestorationRecord,
+        device: AudioOutputDevice,
+        status: OSStatus,
+        mode: PlaybackDuringDictation
+    ) {
+        guard let currentVolume = hardware.volume(of: device) else {
+            removeRecord(for: device.uid)
+            reportApplyFailure(mode: mode, status: status)
+            return
+        }
+
+        if !approximatelyEqual(currentVolume, pendingRecord.originalVolume ?? currentVolume) {
+            upsert(
+                PlaybackRestorationRecord(
+                    deviceUID: device.uid,
+                    originalVolume: pendingRecord.originalVolume,
+                    requestedVolume: pendingRecord.requestedVolume,
+                    appliedVolume: currentVolume,
+                    originalMute: nil,
+                    appliedMute: nil
+                )
+            )
+            activeDeviceUID = device.uid
+        } else {
+            removeRecord(for: device.uid)
+        }
+        reportApplyFailure(mode: mode, status: status)
+    }
+
+    private func markApplied(to device: AudioOutputDevice) {
         activeDeviceUID = device.uid
         isCurrentOutputControllable = true
+    }
+
+    private func reportApplyFailure(
+        mode: PlaybackDuringDictation,
+        status: OSStatus?
+    ) {
+        isCurrentOutputControllable = false
+        let statusDescription = status.map { " (Core Audio \($0))" } ?? ""
+        TimbreLog.line(
+            "Timbre playback: failed to apply \(mode.title.lowercased()) mode\(statusDescription)."
+        )
     }
 
     private func recoverPendingRecords(excluding excludedUID: String? = nil) {
@@ -376,19 +516,35 @@ final class DictationPlaybackController:
             guard currentMute == appliedMute else {
                 return true
             }
-            return hardware.setMute(originalMute, of: device) == noErr
+            guard hardware.setMute(originalMute, of: device) == noErr else {
+                return false
+            }
+            return hardware.mute(of: device) == originalMute
         }
 
-        if let appliedVolume = record.appliedVolume,
-           let originalVolume = record.originalVolume
-        {
+        if let originalVolume = record.originalVolume {
             guard let currentVolume = hardware.volume(of: device) else { return true }
-            guard abs(currentVolume - appliedVolume) <= 0.002 else {
+            let expectedVolume = record.appliedVolume ?? record.requestedVolume
+            guard let expectedVolume else { return true }
+            let tolerance = record.appliedVolume == nil || record.requestedVolume == nil
+                ? Self.pendingWriteTolerance
+                : Self.appliedValueTolerance
+            guard abs(currentVolume - expectedVolume) <= tolerance else {
                 return true
             }
-            return hardware.setVolume(originalVolume, of: device) == noErr
+            guard hardware.setVolume(originalVolume, of: device) == noErr else {
+                return false
+            }
+            guard let restoredVolume = hardware.volume(of: device) else {
+                return false
+            }
+            return approximatelyEqual(restoredVolume, originalVolume)
         }
         return true
+    }
+
+    private func approximatelyEqual(_ lhs: Float, _ rhs: Float) -> Bool {
+        abs(lhs - rhs) <= Self.appliedValueTolerance
     }
 
     private func handleDefaultOutputChange() {

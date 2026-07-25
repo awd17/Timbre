@@ -35,9 +35,9 @@ struct MenuBarMenuView: View {
                let name = unavailable.deviceName
             {
                 Divider()
-                Label(
+                Toggle(
                     "\(name) (Unavailable — using System Default)",
-                    systemImage: "checkmark"
+                    isOn: .constant(true)
                 )
                 .disabled(true)
             }
@@ -71,14 +71,18 @@ struct MenuBarMenuView: View {
         title: String,
         selection: MicrophoneSelection
     ) -> some View {
-        Button {
-            preferences.microphoneSelection = selection
-        } label: {
-            if preferences.microphoneSelection == selection {
-                Label(title, systemImage: "checkmark")
-            } else {
-                Text(title)
-            }
-        }
+        Toggle(
+            title,
+            isOn: Binding(
+                get: {
+                    preferences.microphoneSelection == selection
+                },
+                set: { isSelected in
+                    if isSelected {
+                        preferences.microphoneSelection = selection
+                    }
+                }
+            )
+        )
     }
 }

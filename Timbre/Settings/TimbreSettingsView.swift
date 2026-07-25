@@ -17,124 +17,132 @@ struct TimbreSettingsView: View {
     @State private var isConfirmingReset = false
 
     var body: some View {
-        Form {
-            Section("General") {
-                LabeledContent {
-                    KeyboardShortcuts.Recorder(
-                        for: shortcutName,
-                        onChange: { shortcut in
-                            shortcutState.applySettingsRecorderChange(shortcut)
-                        }
-                    )
-                } label: {
-                    settingLabel(
-                        "Dictation Shortcut",
-                        help: "Required to start and stop dictation from anywhere."
-                    )
-                }
-                .accessibilityIdentifier("settingsDictationShortcut")
-
-                LabeledContent {
-                    Picker("", selection: $preferences.microphoneSelection) {
-                        Text("System Default")
-                            .tag(MicrophoneSelection.systemDefault)
-                        ForEach(inputDevices.devices) { device in
-                            Text(device.name)
-                                .tag(device.selection)
-                        }
-                        if let unavailable = inputDevices.unavailableSelection,
-                           let name = unavailable.deviceName
-                        {
-                            Text("\(name) (Unavailable)")
-                                .tag(unavailable)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 220)
-                    .disabled(!controller.canStart)
-                    .accessibilityIdentifier("settingsMicrophoneInput")
-                } label: {
-                    settingLabel("Microphone Input", help: microphoneHelp)
-                }
-
-                Toggle(
-                    isOn: $preferences.showInDock,
-                    label: {
+        ScrollView {
+            Form {
+                Section("General") {
+                    LabeledContent {
+                        KeyboardShortcuts.Recorder(
+                            for: shortcutName,
+                            onChange: { shortcut in
+                                shortcutState.applySettingsRecorderChange(shortcut)
+                            }
+                        )
+                    } label: {
                         settingLabel(
-                            "Show Timbre in Dock",
-                            help: "Show Timbre in the Dock and when switching apps."
+                            "Dictation Shortcut",
+                            help: "Required to start and stop dictation from anywhere."
                         )
                     }
-                )
-                .accessibilityIdentifier("settingsShowInDock")
-            }
+                    .accessibilityIdentifier("settingsDictationShortcut")
 
-            Section("Dictation") {
-                LabeledContent {
-                    Picker("", selection: $preferences.playbackDuringDictation) {
-                        ForEach(PlaybackDuringDictation.allCases) { behavior in
-                            Text(behavior.title).tag(behavior)
+                    HStack(alignment: .top, spacing: 16) {
+                        settingLabel("Microphone Input", help: microphoneHelp)
+                        Spacer(minLength: 16)
+                        Picker("", selection: $preferences.microphoneSelection) {
+                            Text("System Default")
+                                .tag(MicrophoneSelection.systemDefault)
+                            ForEach(inputDevices.devices) { device in
+                                Text(device.name)
+                                    .tag(device.selection)
+                            }
+                            if let unavailable = inputDevices.unavailableSelection,
+                               let name = unavailable.deviceName
+                            {
+                                Text("\(name) (Unavailable)")
+                                    .tag(unavailable)
+                            }
                         }
+                        .labelsHidden()
+                        .frame(width: 220, alignment: .trailing)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsMicrophoneInput")
                     }
-                    .labelsHidden()
-                    .frame(width: 220)
-                    .disabled(!controller.canStart)
-                    .accessibilityIdentifier("settingsPlaybackBehavior")
-                } label: {
-                    settingLabel(
-                        "Playback While Listening",
-                        help: playbackHelp
+
+                    Toggle(
+                        isOn: $preferences.showInDock,
+                        label: {
+                            settingLabel(
+                                "Show Timbre in Dock",
+                                help: "Show Timbre in the Dock and when switching apps."
+                            )
+                        }
                     )
+                    .accessibilityIdentifier("settingsShowInDock")
                 }
 
-                Toggle(
-                    isOn: $preferences.keepTranscriptOnClipboardAfterInsertion,
-                    label: {
+                Section("Dictation") {
+                    HStack(alignment: .top, spacing: 16) {
                         settingLabel(
-                            "Keep transcript on clipboard",
-                            help: "Keep a copy after Timbre inserts the text. Timbre always uses the clipboard briefly for insertion."
+                            "Playback While Listening",
+                            help: playbackHelp
+                        )
+                        Spacer(minLength: 16)
+                        Picker("", selection: $preferences.playbackDuringDictation) {
+                            ForEach(PlaybackDuringDictation.allCases) { behavior in
+                                Text(behavior.title).tag(behavior)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220, alignment: .trailing)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsPlaybackBehavior")
+                    }
+
+                    Toggle(
+                        isOn: $preferences.keepTranscriptOnClipboardAfterInsertion,
+                        label: {
+                            settingLabel(
+                                "Keep transcript on clipboard",
+                                help: "Keep a copy after Timbre inserts the text. Timbre always uses the clipboard briefly for insertion."
+                            )
+                        }
+                    )
+                    .accessibilityIdentifier("settingsKeepTranscript")
+                }
+
+                Section("Overlay") {
+                    LabeledContent {
+                        Button("Reset Overlay Position") {
+                            onResetOverlayPosition()
+                        }
+                        .accessibilityIdentifier("settingsResetOverlayPosition")
+                    } label: {
+                        settingLabel(
+                            "Position",
+                            help: "Move the dictation overlay back to its default position."
                         )
                     }
-                )
-                .accessibilityIdentifier("settingsKeepTranscript")
-            }
+                }
 
-            Section("Overlay") {
-                LabeledContent {
-                    Button("Reset Overlay Position") {
-                        onResetOverlayPosition()
+                Section("About") {
+                    LabeledContent("Application", value: bundleInformation.appName)
+                    LabeledContent("Version", value: bundleInformation.versionDescription)
+                        .accessibilityIdentifier("settingsVersion")
+
+                    HStack(spacing: 28) {
+                        Spacer()
+                        Button("Reset All Settings…", role: .destructive) {
+                            isConfirmingReset = true
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsResetAll")
+
+                        Button("Quit Timbre") {
+                            onQuit()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settingsQuit")
+                        Spacer()
                     }
-                    .accessibilityIdentifier("settingsResetOverlayPosition")
-                } label: {
-                    settingLabel(
-                        "Position",
-                        help: "Move the dictation overlay back to its default position."
-                    )
+                    .padding(.vertical, 6)
                 }
             }
-
-            Section("Reset") {
-                Button("Reset All Settings…", role: .destructive) {
-                    isConfirmingReset = true
-                }
-                .disabled(!controller.canStart)
-                .accessibilityIdentifier("settingsResetAll")
-            }
-
-            Section("About") {
-                LabeledContent("Application", value: bundleInformation.appName)
-                LabeledContent("Version", value: bundleInformation.versionDescription)
-                    .accessibilityIdentifier("settingsVersion")
-
-                Button("Quit Timbre") {
-                    onQuit()
-                }
-                .accessibilityIdentifier("settingsQuit")
-            }
+            .formStyle(.grouped)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .formStyle(.grouped)
         .frame(minWidth: 460, idealWidth: 500, maxWidth: 560)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(idealHeight: 500, maxHeight: 540)
         .background(
             SettingsWindowLifecycleObserver {
                 shortcutState.finishSettingsShortcutEditing()

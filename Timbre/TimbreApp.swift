@@ -395,8 +395,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         guard controller.canStart else { return }
         playbackController.endListening()
         appPreferences.resetUserSettings()
-        KeyboardShortcuts.reset(shortcutRecorderName)
-        shortcutState.refreshFromStorage()
+        shortcutState.resetSettingsShortcutToDefault()
         dictationIndicatorCoordinator.resetPlacement()
     }
 
