@@ -18,18 +18,21 @@ final class AssistantController {
     private let clipboard: ClipboardServicing
     private let delivery: TranscriptDeliveryServicing
     private let targetProvider: any DictationTargetProviding
+    private let playback: any DictationPlaybackControlling
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
         transcription: TranscriptionServicing,
         clipboard: ClipboardServicing = ClipboardService(),
         delivery: TranscriptDeliveryServicing,
-        targetProvider: any DictationTargetProviding
+        targetProvider: any DictationTargetProviding,
+        playback: (any DictationPlaybackControlling)? = nil
     ) {
         self.transcription = transcription
         self.clipboard = clipboard
         self.delivery = delivery
         self.targetProvider = targetProvider
+        self.playback = playback ?? NoOpDictationPlaybackController()
     }
 
     var liveTranscript: String { sessionState.displayedTranscript }
@@ -81,10 +84,12 @@ final class AssistantController {
                 }
             )
             guard activeSession?.id == session.id else { return }
+            playback.beginListening()
             // Stop is only available after start succeeds.
             sessionState = .listening(transcript: sessionState.displayedTranscript)
         } catch {
             guard activeSession?.id == session.id else { return }
+            playback.endListening()
             await transcription.cancel()
             activeSession = nil
             audioLevel = 0
@@ -100,6 +105,7 @@ final class AssistantController {
     func prepareForTermination() {
         activeSession = nil
         audioLevel = 0
+        playback.shutdownForTermination()
         (transcription as? TerminationHandling)?.shutdownForTermination()
     }
 
@@ -108,6 +114,7 @@ final class AssistantController {
         guard let session = activeSession else { return }
 
         audioLevel = 0
+        playback.endListening()
         sessionState = .finishing(transcript: currentTranscript)
 
         do {

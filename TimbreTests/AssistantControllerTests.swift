@@ -69,6 +69,25 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
 }
 
 @MainActor
+private final class FakeDictationPlaybackController: DictationPlaybackControlling {
+    private(set) var beginCount = 0
+    private(set) var endCount = 0
+    private(set) var shutdownCount = 0
+
+    func beginListening() {
+        beginCount += 1
+    }
+
+    func endListening() {
+        endCount += 1
+    }
+
+    func shutdownForTermination() {
+        shutdownCount += 1
+    }
+}
+
+@MainActor
 private final class RetainedLevelTranscriptionService: TranscriptionServicing {
     private var levelHandler: (@MainActor (Float) -> Void)?
     private var isRunning = false
@@ -101,6 +120,41 @@ private final class RetainedLevelTranscriptionService: TranscriptionServicing {
 
 @MainActor
 final class AssistantControllerTests: XCTestCase {
+    func testPlaybackAttenuationMatchesListeningLifecycle() async {
+        let playback = FakeDictationPlaybackController()
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(
+                behavior: .success(final: "Hello", partials: [])
+            ),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await controller.startDictation()
+        XCTAssertEqual(playback.beginCount, 1)
+        XCTAssertEqual(playback.endCount, 0)
+
+        await controller.stopDictation()
+        XCTAssertEqual(playback.endCount, 1)
+    }
+
+    func testTerminationSynchronouslyShutsDownPlayback() {
+        let playback = FakeDictationPlaybackController()
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        controller.prepareForTermination()
+
+        XCTAssertEqual(playback.shutdownCount, 1)
+    }
+
     func testBeginDictationTransitionsToPreparingSynchronously() {
         let controller = AssistantController(
             transcription: MockTranscriptionService(),

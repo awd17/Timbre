@@ -14,13 +14,25 @@ final class AppPreferencesTests: XCTestCase {
         let preferences = UserDefaultsAppPreferences(defaults: defaults)
         XCTAssertFalse(preferences.keepTranscriptOnClipboardAfterInsertion)
         XCTAssertFalse(preferences.showInDock)
+        XCTAssertEqual(preferences.microphoneSelection, .systemDefault)
+        XCTAssertEqual(preferences.playbackDuringDictation, .keepUnchanged)
 
         preferences.keepTranscriptOnClipboardAfterInsertion = true
         preferences.showInDock = true
+        preferences.microphoneSelection = .device(
+            uid: "test-microphone",
+            name: "Test Microphone"
+        )
+        preferences.playbackDuringDictation = .lower
 
         let reloaded = UserDefaultsAppPreferences(defaults: defaults)
         XCTAssertTrue(reloaded.keepTranscriptOnClipboardAfterInsertion)
         XCTAssertTrue(reloaded.showInDock)
+        XCTAssertEqual(
+            reloaded.microphoneSelection,
+            .device(uid: "test-microphone", name: "Test Microphone")
+        )
+        XCTAssertEqual(reloaded.playbackDuringDictation, .lower)
     }
 
     func testDistinctChangesPublishOnce() {
@@ -31,10 +43,14 @@ final class AppPreferencesTests: XCTestCase {
         preferences.showInDock = true
         preferences.showInDock = true
         preferences.keepTranscriptOnClipboardAfterInsertion = true
+        preferences.microphoneSelection = .device(uid: "uid", name: "Mic")
+        preferences.playbackDuringDictation = .mute
 
         XCTAssertEqual(changes, [
             .showInDock(true),
             .keepTranscriptOnClipboardAfterInsertion(true),
+            .microphoneSelection(.device(uid: "uid", name: "Mic")),
+            .playbackDuringDictation(.mute),
         ])
         withExtendedLifetime(observation) {}
     }
@@ -43,11 +59,53 @@ final class AppPreferencesTests: XCTestCase {
         let keys = Set([
             UserDefaultsAppPreferences.keepTranscriptOnClipboardAfterInsertionKey,
             UserDefaultsAppPreferences.showInDockKey,
+            UserDefaultsAppPreferences.microphoneSelectionKey,
+            UserDefaultsAppPreferences.playbackDuringDictationKey,
         ])
         XCTAssertFalse(keys.contains(UserDefaultsOnboardingPreferences.completedWelcomeKey))
         XCTAssertFalse(keys.contains(UserDefaultsOnboardingPreferences.dismissedReadyKey))
         XCTAssertFalse(
             keys.contains(UserDefaultsOnboardingPreferences.completedShortcutOnboardingKey)
+        )
+    }
+
+    func testResetRestoresUserDefaultsWithoutClearingOnboarding() throws {
+        let suiteName = "TimbrePreferencesResetTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedWelcomeKey)
+        defaults.set(true, forKey: UserDefaultsOnboardingPreferences.dismissedReadyKey)
+
+        let preferences = UserDefaultsAppPreferences(defaults: defaults)
+        preferences.keepTranscriptOnClipboardAfterInsertion = true
+        preferences.showInDock = true
+        preferences.microphoneSelection = .device(uid: "uid", name: "Mic")
+        preferences.playbackDuringDictation = .mute
+
+        preferences.resetUserSettings()
+
+        XCTAssertFalse(preferences.keepTranscriptOnClipboardAfterInsertion)
+        XCTAssertFalse(preferences.showInDock)
+        XCTAssertEqual(preferences.microphoneSelection, .systemDefault)
+        XCTAssertEqual(preferences.playbackDuringDictation, .keepUnchanged)
+        let persistentValues = defaults.persistentDomain(forName: suiteName) ?? [:]
+        XCTAssertNil(
+            persistentValues[
+                UserDefaultsAppPreferences.keepTranscriptOnClipboardAfterInsertionKey
+            ]
+        )
+        XCTAssertNil(persistentValues[UserDefaultsAppPreferences.showInDockKey])
+        XCTAssertNil(
+            persistentValues[UserDefaultsAppPreferences.microphoneSelectionKey]
+        )
+        XCTAssertNil(
+            persistentValues[UserDefaultsAppPreferences.playbackDuringDictationKey]
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: UserDefaultsOnboardingPreferences.completedWelcomeKey)
+        )
+        XCTAssertTrue(
+            defaults.bool(forKey: UserDefaultsOnboardingPreferences.dismissedReadyKey)
         )
     }
 }

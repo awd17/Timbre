@@ -126,4 +126,25 @@ final class DictationIndicatorPlacementTests: XCTestCase {
         XCTAssertEqual(placement.absoluteCenterX, frame.midX, accuracy: 0.001)
         XCTAssertEqual(placement.absoluteCenterY, frame.midY, accuracy: 0.001)
     }
+
+    func testResetClearsSavedPlacement() throws {
+        let suiteName = "DictationIndicatorPlacementResetTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = DictationIndicatorPlacementStore(defaults: defaults)
+        let screen = try XCTUnwrap(NSScreen.main)
+        let frame = NSRect(
+            x: screen.visibleFrame.midX - 42,
+            y: screen.visibleFrame.minY + 48,
+            width: 84,
+            height: 40
+        )
+        store.save(frame: frame, on: screen)
+        XCTAssertNotNil(store.load())
+
+        store.reset()
+
+        XCTAssertNil(store.load())
+        XCTAssertNil(defaults.object(forKey: DictationIndicatorPlacementStore.key))
+    }
 }

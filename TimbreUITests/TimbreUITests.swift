@@ -70,6 +70,7 @@ final class TimbreUITests: XCTestCase {
         try runForegroundOnboarding()
         try runBackgroundOnboarding()
         try runNormalDictationAndBusyStates()
+        try runSettingsSurface()
         try runSecondLaunchWithoutHostOrRebuild()
         try runDeliverySafetyScenarios()
         try runSetupRecoveryScenarios()
@@ -271,6 +272,41 @@ final class TimbreUITests: XCTestCase {
     }
 
     @MainActor
+    private func runSettingsSurface() throws {
+        guard let app else { return XCTFail("Background app was not launched") }
+        let menuWindow = app.windows["Timbre Integration Menu"]
+        let settings = menuWindow.buttons["settingsMenuItem"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 3))
+        settings.click()
+
+        for identifier in [
+            "settingsMicrophoneInput",
+            "settingsPlaybackBehavior",
+            "settingsResetOverlayPosition",
+            "settingsResetAll",
+            "settingsQuit",
+            "settingsVersion",
+        ] {
+            XCTAssertTrue(
+                app.descendants(matching: .any)[identifier].waitForExistence(timeout: 3),
+                hierarchy(app, "Settings is missing \(identifier)")
+            )
+        }
+
+        app.buttons["settingsResetOverlayPosition"].click()
+        app.buttons["settingsResetAll"].click()
+        XCTAssertTrue(
+            app.staticTexts["Reset All Settings?"].waitForExistence(timeout: 3),
+            hierarchy(app, "Reset All Settings should require confirmation")
+        )
+        app.windows["com_apple_SwiftUI_Settings_window"]
+            .sheets.firstMatch
+            .buttons["Cancel"]
+            .click()
+        app.typeKey("w", modifierFlags: .command)
+    }
+
+    @MainActor
     private func runSecondLaunchWithoutHostOrRebuild() throws {
         app?.terminate()
         XCTAssertTrue(app?.wait(for: .notRunning, timeout: 5) == true)
@@ -292,6 +328,10 @@ final class TimbreUITests: XCTestCase {
         XCTAssertTrue(
             app.menuItems["Settings…"].waitForExistence(timeout: 3),
             hierarchy(app, "The compact menu did not expose Settings")
+        )
+        XCTAssertTrue(
+            app.menuItems["Microphone"].exists,
+            hierarchy(app, "The compact menu did not expose the Microphone submenu")
         )
         XCTAssertTrue(app.menuItems["Copy Last Dictation"].exists)
         XCTAssertTrue(app.menuItems["Quit Timbre"].exists)
