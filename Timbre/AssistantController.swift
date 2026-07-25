@@ -1,10 +1,16 @@
 import AppKit
 import Foundation
+import Observation
 
 @MainActor
 @Observable
 final class AssistantController {
-    private(set) var sessionState: SessionState = .idle
+    private(set) var sessionState: SessionState = .idle {
+        didSet {
+            sessionStateHandler?(sessionState)
+        }
+    }
+    private(set) var audioLevel: Float = 0
     private(set) var lastCompletedTranscript: String?
     private(set) var activeSession: DictationSessionContext?
 
@@ -12,6 +18,7 @@ final class AssistantController {
     private let clipboard: ClipboardServicing
     private let delivery: TranscriptDeliveryServicing
     private let targetProvider: any DictationTargetProviding
+    @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
         transcription: TranscriptionServicing,
@@ -31,22 +38,48 @@ final class AssistantController {
     var canStop: Bool { sessionState.canStop }
     var canCopyLastTranscript: Bool { lastCompletedTranscript != nil }
 
-    func startDictation() async {
-        guard canStart else { return }
+    func setSessionStateHandler(_ handler: ((SessionState) -> Void)?) {
+        sessionStateHandler = handler
+    }
+
+    /// Starts the visible session synchronously, then performs preparation asynchronously.
+    /// Shortcut handling uses this entry point so the indicator appears in the same event turn.
+    @discardableResult
+    func beginDictation() -> Task<Void, Never>? {
+        guard canStart else { return nil }
 
         let session = DictationSessionContext(target: targetProvider.captureTarget())
         activeSession = session
+        audioLevel = 0
         sessionState = .preparing
 
+        return Task { [weak self] in
+            await self?.prepareAndStart(session)
+        }
+    }
+
+    func startDictation() async {
+        guard let task = beginDictation() else { return }
+        await task.value
+    }
+
+    private func prepareAndStart(_ session: DictationSessionContext) async {
         do {
             try await transcription.prepare()
             guard activeSession?.id == session.id else { return }
 
-            try await transcription.start { [weak self] partial in
-                guard let self else { return }
-                guard self.activeSession?.id == session.id else { return }
-                self.sessionState = self.sessionState.updatingTranscript(partial)
-            }
+            try await transcription.start(
+                onPartialResult: { [weak self] partial in
+                    guard let self else { return }
+                    guard self.activeSession?.id == session.id else { return }
+                    self.sessionState = self.sessionState.updatingTranscript(partial)
+                },
+                onAudioLevel: { [weak self] level in
+                    guard let self else { return }
+                    guard self.activeSession?.id == session.id else { return }
+                    self.audioLevel = min(max(level, 0), 1)
+                }
+            )
             guard activeSession?.id == session.id else { return }
             // Stop is only available after start succeeds.
             sessionState = .listening(transcript: sessionState.displayedTranscript)
@@ -54,13 +87,19 @@ final class AssistantController {
             guard activeSession?.id == session.id else { return }
             await transcription.cancel()
             activeSession = nil
-            sessionState = .failed(message: error.localizedDescription, transcript: "")
+            audioLevel = 0
+            sessionState = .failed(
+                kind: Self.failureKind(for: error),
+                message: error.localizedDescription,
+                transcript: ""
+            )
         }
     }
 
     /// Releases microphone resources synchronously before the process exits.
     func prepareForTermination() {
         activeSession = nil
+        audioLevel = 0
         (transcription as? TerminationHandling)?.shutdownForTermination()
     }
 
@@ -68,6 +107,7 @@ final class AssistantController {
         guard case .listening(let currentTranscript) = sessionState else { return }
         guard let session = activeSession else { return }
 
+        audioLevel = 0
         sessionState = .finishing(transcript: currentTranscript)
 
         do {
@@ -78,6 +118,7 @@ final class AssistantController {
             guard !trimmed.isEmpty else {
                 activeSession = nil
                 sessionState = .failed(
+                    kind: .noSpeech,
                     message: TranscriptionError.emptyResult.localizedDescription,
                     transcript: currentTranscript
                 )
@@ -96,7 +137,9 @@ final class AssistantController {
         } catch {
             guard activeSession?.id == session.id else { return }
             activeSession = nil
+            audioLevel = 0
             sessionState = .failed(
+                kind: Self.failureKind(for: error),
                 message: error.localizedDescription,
                 transcript: sessionState.displayedTranscript
             )
@@ -124,6 +167,22 @@ final class AssistantController {
             return .copiedAfterInsertFailure
         case .failed:
             return .deliveryFailed
+        }
+    }
+
+    private static func failureKind(for error: Error) -> SessionFailureKind {
+        guard let transcriptionError = error as? TranscriptionError else {
+            return .recognition
+        }
+        switch transcriptionError {
+        case .emptyResult:
+            return .noSpeech
+        case .microphonePermissionDenied, .speechPermissionDenied:
+            return .permission
+        case .audioEngineFailed:
+            return .audio
+        case .notAvailable, .alreadyRunning, .notRunning, .recognitionFailed:
+            return .recognition
         }
     }
 

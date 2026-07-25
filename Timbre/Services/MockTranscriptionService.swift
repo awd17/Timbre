@@ -34,7 +34,10 @@ final class MockTranscriptionService: TranscriptionServicing {
         }
     }
 
-    func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
         if session != nil {
             throw TranscriptionError.alreadyRunning
         }
@@ -57,7 +60,7 @@ final class MockTranscriptionService: TranscriptionServicing {
 
         let delay = partialDelayNanoseconds
         partialTask = Task { [weak self] in
-            for partial in partials {
+            for (index, partial) in partials.enumerated() {
                 guard !Task.isCancelled else { return }
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled else { return }
@@ -68,6 +71,7 @@ final class MockTranscriptionService: TranscriptionServicing {
                           !active.isInvalidated
                     else { return }
                     active.deliverPartial(partial)
+                    onAudioLevel(index.isMultiple(of: 2) ? 0.35 : 0.7)
                 }
             }
         }

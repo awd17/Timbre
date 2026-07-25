@@ -44,7 +44,7 @@ final class DictationShortcutActionTests: XCTestCase {
         )
         XCTAssertEqual(
             DictationShortcutPolicy.resolve(
-                session: .failed(message: "err", transcript: ""),
+                session: .failed(kind: .recognition, message: "err", transcript: ""),
                 setup: .unrestricted
             ),
             .start

@@ -52,6 +52,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let appPreferences: UserDefaultsAppPreferences
     let dockVisibilityCoordinator: DockVisibilityCoordinator
     let settingsOpeningCoordinator: SettingsOpeningCoordinator
+    let dictationIndicatorCoordinator: DictationIndicatorWindowController
     let shortcutState: KeyboardShortcutsOnboardingAdapter
     let shortcutRecorderName: KeyboardShortcuts.Name
 
@@ -223,6 +224,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             delivery: selectedDelivery,
             targetProvider: targetProvider
         )
+        dictationIndicatorCoordinator = DictationIndicatorWindowController(
+            controller: controller,
+            placementStore: DictationIndicatorPlacementStore(
+                defaults: selectedAppPreferences.defaults
+            )
+        )
         shortcutCoordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: selectedSetupCoordinator,
@@ -269,6 +276,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        dictationIndicatorCoordinator.start()
+
         #if DEBUG
         presentDebugWindowIfNeeded()
         ParakeetFixtureGate.runIfRequested(
@@ -304,6 +313,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         shortcutCoordinator.stop()
+        dictationIndicatorCoordinator.stop()
         controller.prepareForTermination()
         #if DEBUG
         integrationRuntime?.cleanupPersistentStateIfRequested()

@@ -69,7 +69,67 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
 }
 
 @MainActor
+private final class RetainedLevelTranscriptionService: TranscriptionServicing {
+    private var levelHandler: (@MainActor (Float) -> Void)?
+    private var isRunning = false
+
+    func prepare() async throws {}
+
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
+        _ = onPartialResult
+        isRunning = true
+        levelHandler = onAudioLevel
+    }
+
+    func stop() async throws -> String {
+        guard isRunning else { throw TranscriptionError.notRunning }
+        isRunning = false
+        return "Retained callback"
+    }
+
+    func cancel() async {
+        isRunning = false
+    }
+
+    func emitLevel(_ level: Float) {
+        levelHandler?(level)
+    }
+}
+
+@MainActor
 final class AssistantControllerTests: XCTestCase {
+    func testBeginDictationTransitionsToPreparingSynchronously() {
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        let task = controller.beginDictation()
+
+        XCTAssertNotNil(task)
+        XCTAssertEqual(controller.sessionState, .preparing)
+    }
+
+    func testBeginDictationPublishesPreparingSynchronously() {
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+        var observedStates: [SessionState] = []
+        controller.setSessionStateHandler { observedStates.append($0) }
+
+        _ = controller.beginDictation()
+
+        XCTAssertEqual(observedStates.first, .preparing)
+    }
+
     func testSuccessfulDictationDeliversFinalTranscript() async {
         let mock = MockTranscriptionService(
             behavior: .success(final: "Hello world", partials: ["Hello", "Hello world"]),
@@ -157,12 +217,55 @@ final class AssistantControllerTests: XCTestCase {
 
         XCTAssertEqual(
             controller.sessionState,
-            .failed(message: TranscriptionError.emptyResult.localizedDescription, transcript: "")
+            .failed(
+                kind: .noSpeech,
+                message: TranscriptionError.emptyResult.localizedDescription,
+                transcript: ""
+            )
         )
         XCTAssertTrue(clipboard.copiedValues.isEmpty)
         XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
         XCTAssertNil(controller.lastCompletedTranscript)
         XCTAssertNil(controller.activeSession)
+    }
+
+    func testAudioLevelUpdatesOnlyDuringActiveSessionAndResetsOnStop() async {
+        let mock = MockTranscriptionService(
+            behavior: .success(final: "Hello", partials: ["Hello"]),
+            partialDelayNanoseconds: 1_000_000
+        )
+        let controller = AssistantController(
+            transcription: mock,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        await waitForTranscript(controller, containing: "Hello")
+        XCTAssertGreaterThan(controller.audioLevel, 0)
+
+        await controller.stopDictation()
+        XCTAssertEqual(controller.audioLevel, 0)
+    }
+
+    func testLateAudioLevelFromCompletedSessionIsIgnored() async {
+        let transcription = RetainedLevelTranscriptionService()
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        transcription.emitLevel(0.8)
+        XCTAssertEqual(controller.audioLevel, 0.8)
+
+        await controller.stopDictation()
+        transcription.emitLevel(1)
+
+        XCTAssertEqual(controller.audioLevel, 0)
     }
 
     func testPreparePermissionErrorSetsFailedState() async {
@@ -183,6 +286,7 @@ final class AssistantControllerTests: XCTestCase {
         XCTAssertEqual(
             controller.sessionState,
             .failed(
+                kind: .permission,
                 message: TranscriptionError.speechPermissionDenied.localizedDescription,
                 transcript: ""
             )

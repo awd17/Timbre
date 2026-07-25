@@ -7,7 +7,7 @@ import Foundation
 protocol ParakeetAudioSource: AnyObject {
     var diagnosticLabel: String { get }
     func prepareAccess() async throws
-    func begin() throws
+    func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws
     /// Stop capture if any, then return an immutable sample snapshot.
     func finish() throws -> [Float]
     func teardown()
@@ -35,7 +35,7 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
         }
     }
 
-    func begin() throws {
+    func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws {
         teardown()
 
         let engine = AVAudioEngine()
@@ -50,8 +50,14 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
         TimbreLog.line("Timbre Parakeet: hardware input format \(hardwareFormatDescription)")
 
         let captureBuffer = capture
+        let meter = AudioLevelMeter()
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             captureBuffer.append(buffer)
+            if let level = meter.consume(buffer) {
+                Task { @MainActor in
+                    onAudioLevel(level)
+                }
+            }
         }
         hasInstalledTap = true
         audioEngine = engine
@@ -103,7 +109,8 @@ final class ParakeetFixtureAudioSource: ParakeetAudioSource {
 
     func prepareAccess() async throws {}
 
-    func begin() throws {
+    func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws {
+        _ = onAudioLevel
         TimbreLog.line("Timbre Parakeet: fixture mode — no microphone capture.")
     }
 

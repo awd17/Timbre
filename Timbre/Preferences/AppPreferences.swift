@@ -46,7 +46,7 @@ final class UserDefaultsAppPreferences: ObservableObject, AppPreferencesProvidin
         changeSubject.eraseToAnyPublisher()
     }
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private let changeSubject = PassthroughSubject<AppPreferenceChange, Never>()
 
     init(defaults: UserDefaults = .standard) {

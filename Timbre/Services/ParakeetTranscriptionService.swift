@@ -36,7 +36,10 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
 #endif
     }
 
-    func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
         if session != nil {
             throw TranscriptionError.alreadyRunning
         }
@@ -45,7 +48,7 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         session = TranscriptionSession(onPartialResult: onPartialResult)
 
         do {
-            try audioSource.begin()
+            try audioSource.begin(onAudioLevel: onAudioLevel)
         } catch {
             tearDownSession(invalidateSession: true)
             throw error
