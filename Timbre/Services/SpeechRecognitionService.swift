@@ -7,6 +7,7 @@ import Speech
 final class SpeechRecognitionService: TranscriptionServicing, TerminationHandling {
     private let locale: Locale
     private let speechRecognizer: SFSpeechRecognizer?
+    private let inputDevices: CoreAudioInputDeviceManager
 
     private var session: TranscriptionSession?
     private var audioEngine: AVAudioEngine?
@@ -15,8 +16,12 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
     private var hasInstalledTap = false
     private var stopTimeoutTask: Task<Void, Never>?
 
-    init(locale: Locale = .current) {
+    init(
+        locale: Locale = .current,
+        inputDevices: CoreAudioInputDeviceManager
+    ) {
         self.locale = locale
+        self.inputDevices = inputDevices
         self.speechRecognizer = SFSpeechRecognizer(locale: locale)
     }
 
@@ -67,6 +72,7 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
         }
 
         let inputNode = engine.inputNode
+        _ = try inputDevices.configureInputNode(inputNode)
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             await tearDown(invalidateSession: true)

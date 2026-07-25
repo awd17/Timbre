@@ -101,4 +101,16 @@ final class KeyboardShortcutsOnboardingAdapter: ShortcutOnboardingProviding {
         lastAssignedShortcut = restored
         applyRecorderChange(isAssigned: true, displayString: restored.description)
     }
+
+    /// Resets the shortcut without allowing an open Settings editor to restore
+    /// the shortcut that was active before the reset.
+    func resetSettingsShortcutToDefault() {
+        let shortcut = DictationShortcutName.recommendedShortcut
+        KeyboardShortcuts.setShortcut(shortcut, for: name)
+        lastAssignedShortcut = shortcut
+        if settingsRollbackShortcut != nil {
+            settingsRollbackShortcut = shortcut
+        }
+        applyRecorderChange(isAssigned: true, displayString: shortcut.description)
+    }
 }

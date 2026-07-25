@@ -3,65 +3,146 @@ import SwiftUI
 
 struct TimbreSettingsView: View {
     @ObservedObject var preferences: UserDefaultsAppPreferences
+    @ObservedObject var inputDevices: CoreAudioInputDeviceManager
+    @ObservedObject var playbackController: DictationPlaybackController
+    var controller: AssistantController
     let shortcutState: KeyboardShortcutsOnboardingAdapter
     let shortcutName: KeyboardShortcuts.Name
     let bundleInformation: any BundleInformationProviding
+    let onResetOverlayPosition: () -> Void
+    let onResetAllSettings: () -> Void
+    let onQuit: () -> Void
     let onClose: () -> Void
 
+    @State private var isConfirmingReset = false
+
     var body: some View {
-        Form {
-            Section("General") {
-                LabeledContent {
-                    VStack(alignment: .trailing, spacing: 4) {
+        ScrollView {
+            Form {
+                Section("General") {
+                    LabeledContent {
                         KeyboardShortcuts.Recorder(
                             for: shortcutName,
                             onChange: { shortcut in
                                 shortcutState.applySettingsRecorderChange(shortcut)
                             }
                         )
+                    } label: {
+                        settingLabel(
+                            "Dictation Shortcut",
+                            help: "Required to start and stop dictation from anywhere."
+                        )
                     }
-                } label: {
-                    settingLabel(
-                        "Dictation Shortcut",
-                        help: "Required to start and stop dictation from anywhere."
+                    .accessibilityIdentifier("settingsDictationShortcut")
+
+                    HStack(alignment: .top, spacing: 16) {
+                        settingLabel("Microphone Input", help: microphoneHelp)
+                        Spacer(minLength: 16)
+                        Picker("", selection: $preferences.microphoneSelection) {
+                            Text("System Default")
+                                .tag(MicrophoneSelection.systemDefault)
+                            ForEach(inputDevices.devices) { device in
+                                Text(device.name)
+                                    .tag(device.selection)
+                            }
+                            if let unavailable = inputDevices.unavailableSelection,
+                               let name = unavailable.deviceName
+                            {
+                                Text("\(name) (Unavailable)")
+                                    .tag(unavailable)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220, alignment: .trailing)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsMicrophoneInput")
+                    }
+
+                    Toggle(
+                        isOn: $preferences.showInDock,
+                        label: {
+                            settingLabel(
+                                "Show Timbre in Dock",
+                                help: "Show Timbre in the Dock and when switching apps."
+                            )
+                        }
                     )
+                    .accessibilityIdentifier("settingsShowInDock")
                 }
-                .accessibilityIdentifier("settingsDictationShortcut")
 
-                Toggle(
-                    isOn: $preferences.showInDock,
-                    label: {
+                Section("Dictation") {
+                    HStack(alignment: .top, spacing: 16) {
                         settingLabel(
-                            "Show Timbre in Dock",
-                            help: "Show Timbre in the Dock and when switching apps."
+                            "Playback While Listening",
+                            help: playbackHelp
+                        )
+                        Spacer(minLength: 16)
+                        Picker("", selection: $preferences.playbackDuringDictation) {
+                            ForEach(PlaybackDuringDictation.allCases) { behavior in
+                                Text(behavior.title).tag(behavior)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(width: 220, alignment: .trailing)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsPlaybackBehavior")
+                    }
+
+                    Toggle(
+                        isOn: $preferences.keepTranscriptOnClipboardAfterInsertion,
+                        label: {
+                            settingLabel(
+                                "Keep transcript on clipboard",
+                                help: "Keep a copy after Timbre inserts the text. Timbre always uses the clipboard briefly for insertion."
+                            )
+                        }
+                    )
+                    .accessibilityIdentifier("settingsKeepTranscript")
+                }
+
+                Section("Overlay") {
+                    LabeledContent {
+                        Button("Reset Overlay Position") {
+                            onResetOverlayPosition()
+                        }
+                        .accessibilityIdentifier("settingsResetOverlayPosition")
+                    } label: {
+                        settingLabel(
+                            "Position",
+                            help: "Move the dictation overlay back to its default position."
                         )
                     }
-                )
-                .accessibilityIdentifier("settingsShowInDock")
-            }
+                }
 
-            Section("Dictation") {
-                Toggle(
-                    isOn: $preferences.keepTranscriptOnClipboardAfterInsertion,
-                    label: {
-                        settingLabel(
-                            "Keep transcript on clipboard",
-                            help: "Keep a copy after Timbre inserts the text. Timbre always uses the clipboard briefly for insertion."
-                        )
+                Section("About") {
+                    LabeledContent("Application", value: bundleInformation.appName)
+                    LabeledContent("Version", value: bundleInformation.versionDescription)
+                        .accessibilityIdentifier("settingsVersion")
+
+                    HStack(spacing: 28) {
+                        Spacer()
+                        Button("Reset All Settings…", role: .destructive) {
+                            isConfirmingReset = true
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!controller.canStart)
+                        .accessibilityIdentifier("settingsResetAll")
+
+                        Button("Quit Timbre") {
+                            onQuit()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settingsQuit")
+                        Spacer()
                     }
-                )
-                .accessibilityIdentifier("settingsKeepTranscript")
+                    .padding(.vertical, 6)
+                }
             }
-
-            Section("About") {
-                LabeledContent("Application", value: bundleInformation.appName)
-                LabeledContent("Version", value: bundleInformation.versionDescription)
-                    .accessibilityIdentifier("settingsVersion")
-            }
+            .formStyle(.grouped)
+            .fixedSize(horizontal: false, vertical: true)
         }
-        .formStyle(.grouped)
         .frame(minWidth: 460, idealWidth: 500, maxWidth: 560)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(idealHeight: 500, maxHeight: 540)
         .background(
             SettingsWindowLifecycleObserver {
                 shortcutState.finishSettingsShortcutEditing()
@@ -70,8 +151,42 @@ struct TimbreSettingsView: View {
                 .frame(width: 0, height: 0)
         )
         .onAppear {
+            inputDevices.refresh()
             shortcutState.refreshFromStorage()
             shortcutState.beginSettingsShortcutEditing()
+        }
+        .alert("Reset All Settings?", isPresented: $isConfirmingReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset Settings", role: .destructive) {
+                onResetAllSettings()
+            }
+        } message: {
+            Text(
+                "This resets Timbre’s shortcut, microphone, playback, Dock, clipboard, and overlay settings. Setup and downloaded models are kept."
+            )
+        }
+    }
+
+    private var microphoneHelp: String {
+        if inputDevices.unavailableSelection != nil {
+            return "The saved microphone is unavailable. Timbre will use the current macOS default until it reconnects."
+        }
+        return "Choose a Mac or USB microphone to preserve Bluetooth headphone playback quality."
+    }
+
+    private var playbackHelp: String {
+        if preferences.playbackDuringDictation != .keepUnchanged,
+           !playbackController.isCurrentOutputControllable
+        {
+            return "The current output controls volume externally, so Timbre cannot change it."
+        }
+        switch preferences.playbackDuringDictation {
+        case .keepUnchanged:
+            return "Leave other audio at its current volume."
+        case .lower:
+            return "Temporarily reduce the current output to 25% while listening."
+        case .mute:
+            return "Temporarily mute the current output while listening."
         }
     }
 

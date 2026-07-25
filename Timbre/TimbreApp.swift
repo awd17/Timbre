@@ -23,9 +23,21 @@ struct TimbreApp: App {
         Settings {
             TimbreSettingsView(
                 preferences: appDelegate.appPreferences,
+                inputDevices: appDelegate.audioInputDevices,
+                playbackController: appDelegate.playbackController,
+                controller: appDelegate.controller,
                 shortcutState: appDelegate.shortcutState,
                 shortcutName: appDelegate.shortcutRecorderName,
                 bundleInformation: BundleInformation(),
+                onResetOverlayPosition: {
+                    appDelegate.dictationIndicatorCoordinator.resetPlacement()
+                },
+                onResetAllSettings: {
+                    appDelegate.resetAllSettings()
+                },
+                onQuit: {
+                    appDelegate.controller.quit()
+                },
                 onClose: {
                     appDelegate.settingsOpeningCoordinator.settingsWindowWillClose()
                 }
@@ -50,6 +62,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let prewarmCoordinator: ParakeetPrewarmCoordinator?
     let shortcutCoordinator: DictationShortcutCoordinator
     let appPreferences: UserDefaultsAppPreferences
+    let audioInputDevices: CoreAudioInputDeviceManager
+    let playbackController: DictationPlaybackController
     let dockVisibilityCoordinator: DockVisibilityCoordinator
     let settingsOpeningCoordinator: SettingsOpeningCoordinator
     let dictationIndicatorCoordinator: DictationIndicatorWindowController
@@ -69,6 +83,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     var menuContent: MenuBarMenuView {
         MenuBarMenuView(
             controller: controller,
+            preferences: appPreferences,
+            inputDevices: audioInputDevices,
             setupCoordinator: setupCoordinator,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
@@ -112,6 +128,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 .standard
                 #endif
             }()
+        )
+        let selectedAudioInputDevices = CoreAudioInputDeviceManager(
+            preferences: selectedAppPreferences
         )
 
         #if DEBUG
@@ -159,7 +178,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 : nil
             selectedTranscription = Self.makeTranscriptionService(
                 modelManager: productionModelManager,
-                arguments: arguments
+                arguments: arguments,
+                inputDevices: selectedAudioInputDevices
             )
             selectedDelivery = Self.makeTranscriptDelivery(
                 arguments: arguments,
@@ -191,7 +211,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         selectedTranscription = Self.makeTranscriptionService(
             modelManager: productionModelManager,
-            arguments: arguments
+            arguments: arguments,
+            inputDevices: selectedAudioInputDevices
         )
         selectedDelivery = FocusedApplicationTextOutputService(
             accessibility: liveAccessibility,
@@ -211,6 +232,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         shortcutRecorderName = selectedShortcutName
         self.shortcutState = selectedShortcutState
         appPreferences = selectedAppPreferences
+        audioInputDevices = selectedAudioInputDevices
+        let playbackController = DictationPlaybackController(
+            preferences: selectedAppPreferences,
+            defaults: selectedAppPreferences.defaults
+        )
+        self.playbackController = playbackController
         let dockVisibilityCoordinator = DockVisibilityCoordinator(
             preferences: selectedAppPreferences
         )
@@ -222,7 +249,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             transcription: selectedTranscription,
             clipboard: selectedClipboard,
             delivery: selectedDelivery,
-            targetProvider: targetProvider
+            targetProvider: targetProvider,
+            playback: playbackController
         )
         dictationIndicatorCoordinator = DictationIndicatorWindowController(
             controller: controller,
@@ -315,6 +343,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         shortcutCoordinator.stop()
         dictationIndicatorCoordinator.stop()
         controller.prepareForTermination()
+        audioInputDevices.stopMonitoring()
         #if DEBUG
         integrationRuntime?.cleanupPersistentStateIfRequested()
         #endif
@@ -360,6 +389,14 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             )
         }
         setupWindowController?.present()
+    }
+
+    func resetAllSettings() {
+        guard controller.canStart else { return }
+        playbackController.endListening()
+        appPreferences.resetUserSettings()
+        shortcutState.resetSettingsShortcutToDefault()
+        dictationIndicatorCoordinator.resetPlacement()
     }
 
     private static func applyBundledApplicationIcon() {
@@ -440,7 +477,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
     private static func makeTranscriptionService(
         modelManager: ParakeetModelManager,
-        arguments: [String]
+        arguments: [String],
+        inputDevices: CoreAudioInputDeviceManager
     ) -> any TranscriptionServicing {
         #if DEBUG
         let isDebug = true
@@ -470,7 +508,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             return MockTranscriptionService()
             #else
             return ParakeetTranscriptionService(
-                audioSource: ParakeetMicrophoneAudioSource(),
+                audioSource: ParakeetMicrophoneAudioSource(
+                    inputDevices: inputDevices
+                ),
                 modelManager: modelManager
             )
             #endif
@@ -493,15 +533,19 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             }
             #endif
             return ParakeetTranscriptionService(
-                audioSource: ParakeetMicrophoneAudioSource(),
+                audioSource: ParakeetMicrophoneAudioSource(
+                    inputDevices: inputDevices
+                ),
                 modelManager: modelManager
             )
         case .appleSpeech:
             #if DEBUG
-            return SpeechRecognitionService()
+            return SpeechRecognitionService(inputDevices: inputDevices)
             #else
             return ParakeetTranscriptionService(
-                audioSource: ParakeetMicrophoneAudioSource(),
+                audioSource: ParakeetMicrophoneAudioSource(
+                    inputDevices: inputDevices
+                ),
                 modelManager: modelManager
             )
             #endif

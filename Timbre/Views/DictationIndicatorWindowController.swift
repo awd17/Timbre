@@ -24,6 +24,10 @@ final class DictationIndicatorPlacementStore {
         return try? JSONDecoder().decode(DictationIndicatorPlacement.self, from: data)
     }
 
+    func reset() {
+        defaults.removeObject(forKey: Self.key)
+    }
+
     func save(frame: NSRect, on screen: NSScreen) {
         let visibleFrame = screen.visibleFrame
         guard visibleFrame.width > 0, visibleFrame.height > 0 else { return }
@@ -165,6 +169,21 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         }
         screenObserver = nil
         panel?.orderOut(nil)
+    }
+
+    func resetPlacement() {
+        placementStore.reset()
+        guard let panel else { return }
+        let frame = DictationIndicatorPlacementStore.restoredFrame(
+            size: Self.panelSize,
+            placement: nil,
+            screens: NSScreen.screens,
+            pointerLocation: NSEvent.mouseLocation
+        )
+        guard let frame else { return }
+        isApplyingFrame = true
+        panel.setFrame(frame, display: panel.isVisible)
+        isApplyingFrame = false
     }
 
     private func reconcile(_ state: SessionState) {

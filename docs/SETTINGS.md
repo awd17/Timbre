@@ -9,12 +9,43 @@ visibility is enabled. Repeated actions focus the same window.
 | Setting | Default | Behavior |
 |---|---:|---|
 | Dictation shortcut | Existing `⌃⇧D` default | Required for dictation and shared with onboarding. Clearing is a temporary editing state; closing Settings without a replacement restores the previous shortcut. |
+| Microphone input | System Default | Stores a stable Core Audio device UID. A disconnected saved microphone falls back to the current macOS default without forgetting the choice and is reused when it reconnects. |
 | Show Timbre in Dock | Off | Switches Timbre between regular and accessory activation policy immediately. The menu-bar item remains available. |
+| Playback while listening | Keep Unchanged | Can leave playback alone, lower the default output to 25% of its starting volume, or mute it until listening ends. |
 | Keep transcript on clipboard | Off | Leaves a successfully inserted transcript on the clipboard when enabled. |
 
-The About section reads the marketing version and build from the app bundle.
+The Overlay section can clear the saved panel placement and immediately move an
+existing panel to the default bottom-center position on the pointer's display.
+Reset All Settings restores the shortcut, microphone, playback, Dock, clipboard,
+and overlay defaults. It deliberately keeps onboarding completion, downloaded
+models, permissions, and the last transcript.
+
+The About section reads the marketing version and build from the app bundle and
+provides Quit Timbre through the normal application termination path.
 Launch at Login is deferred until the packaging/signing release work, where
 `SMAppService.mainApp` can be verified with an installed, signed bundle.
+
+Microphone, playback, and full-reset controls are disabled during an active
+dictation. A microphone choice is resolved and bound immediately before each
+recording, before the input format is read or an audio tap is installed.
+
+## Audio routing and restoration
+
+The menu-bar menu includes a native Microphone submenu with System Default first
+and every connected usable input after it. A remembered but disconnected device
+remains visible as unavailable while Timbre uses System Default. Selecting the
+Mac or a USB microphone while AirPods remain the output avoids activating the
+Bluetooth microphone path that reduces playback quality.
+
+Lower and Mute operate on the default output's Core Audio virtual main volume or
+mute control; they do not capture system audio or require another privacy
+permission. Outputs with fixed or externally managed volume are left unchanged.
+
+Before changing playback, Timbre writes a restoration record containing the
+output UID, starting state, and applied state. Playback is restored on stop,
+failure, output switching, reset, and termination. A later launch also recovers
+an interrupted session, but only if the output still matches Timbre's applied
+state, so a manual volume adjustment is never overwritten.
 
 ## Clipboard semantics
 
@@ -40,6 +71,5 @@ preference. If Dock visibility is turned off while Settings is open, Timbre
 returns to accessory mode when the window closes. The existing AppIcon catalog
 contains all macOS sizes; visual redesign remains release work if desired.
 
-The native menu contains Settings, Copy Last Dictation, and Quit. Check for
-Updates, microphone-input controls, and the floating dictation indicator remain
-later work.
+The native menu contains the Microphone submenu, Settings, Copy Last Dictation,
+and Quit. Check for Updates remains later work.

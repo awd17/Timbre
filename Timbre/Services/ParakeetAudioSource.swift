@@ -19,10 +19,15 @@ protocol ParakeetAudioSource: AnyObject {
 final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
     let diagnosticLabel = "microphone"
 
+    private let inputDevices: CoreAudioInputDeviceManager
     private let capture = ParakeetCaptureBuffer()
     private var audioEngine: AVAudioEngine?
     private var hasInstalledTap = false
     private(set) var hardwareFormatDescription = "unknown"
+
+    init(inputDevices: CoreAudioInputDeviceManager) {
+        self.inputDevices = inputDevices
+    }
 
     func prepareAccess() async throws {
         let granted = await withCheckedContinuation { continuation in
@@ -40,6 +45,7 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
 
         let engine = AVAudioEngine()
         let inputNode = engine.inputNode
+        let effectiveDevice = try inputDevices.configureInputNode(inputNode)
         let format = inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
             throw TranscriptionError.audioEngineFailed
@@ -48,6 +54,9 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
         hardwareFormatDescription =
             "rate=\(format.sampleRate) channels=\(format.channelCount) commonFormat=\(format.commonFormat.rawValue)"
         TimbreLog.line("Timbre Parakeet: hardware input format \(hardwareFormatDescription)")
+        if let effectiveDevice {
+            TimbreLog.line("Timbre Parakeet: effective microphone \(effectiveDevice.name)")
+        }
 
         let captureBuffer = capture
         let meter = AudioLevelMeter()
