@@ -35,7 +35,10 @@ enum TranscriptionError: Error, Equatable, LocalizedError {
 @MainActor
 protocol TranscriptionServicing: AnyObject {
     func prepare() async throws
-    func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws
     func stop() async throws -> String
     func cancel() async
 }

@@ -7,13 +7,20 @@ enum TranscriptCompletionOutcome: Equatable {
     case deliveryFailed
 }
 
+enum SessionFailureKind: Equatable {
+    case noSpeech
+    case permission
+    case audio
+    case recognition
+}
+
 enum SessionState: Equatable {
     case idle
     case preparing
     case listening(transcript: String)
     case finishing(transcript: String)
     case completed(transcript: String, outcome: TranscriptCompletionOutcome)
-    case failed(message: String, transcript: String)
+    case failed(kind: SessionFailureKind, message: String, transcript: String)
 
     var displayedTranscript: String {
         switch self {
@@ -22,7 +29,7 @@ enum SessionState: Equatable {
         case .listening(let transcript),
              .finishing(let transcript),
              .completed(let transcript, _),
-             .failed(_, let transcript):
+             .failed(_, _, let transcript):
             return transcript
         }
     }
@@ -48,7 +55,7 @@ enum SessionState: Equatable {
             case .deliveryFailed:
                 return "Couldn't copy or insert text."
             }
-        case .failed(let message, _):
+        case .failed(_, let message, _):
             return message
         }
     }

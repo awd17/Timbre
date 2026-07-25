@@ -632,16 +632,21 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
         try await Task.sleep(for: .milliseconds(300))
     }
 
-    func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
         guard !isRunning else { throw TranscriptionError.alreadyRunning }
         isRunning = true
         probe.recordSessionStarted()
         partialTask = Task {
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
+            onAudioLevel(0.35)
             onPartialResult("Integration")
             try? await Task.sleep(for: .milliseconds(80))
             guard !Task.isCancelled else { return }
+            onAudioLevel(0.75)
             onPartialResult(Self.finalTranscript)
         }
     }

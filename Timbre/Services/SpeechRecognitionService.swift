@@ -41,7 +41,10 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
         }
     }
 
-    func start(onPartialResult: @escaping @MainActor (String) -> Void) async throws {
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
         if session != nil {
             throw TranscriptionError.alreadyRunning
         }
@@ -71,8 +74,14 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
         }
 
         // Capture the request locally so the tap never races assignment onto `self`.
+        let meter = AudioLevelMeter()
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             request.append(buffer)
+            if let level = meter.consume(buffer) {
+                Task { @MainActor in
+                    onAudioLevel(level)
+                }
+            }
         }
         hasInstalledTap = true
         audioEngine = engine

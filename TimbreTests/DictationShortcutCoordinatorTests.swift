@@ -37,6 +37,7 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         coordinator.start()
 
         fake.fire()
+        XCTAssertEqual(controller.sessionState, .preparing)
         await waitUntil(controller) {
             if case .listening = $0.sessionState { return true }
             return false
