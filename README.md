@@ -125,11 +125,11 @@ repository secrets. Because the app is not Developer ID-signed or notarized,
 users must approve it in Privacy & Security on first launch.
 
 Make sure `MARKETING_VERSION` in the Xcode project matches the release tag
-without the leading `v`. To publish version 1.0.0:
+without the leading `v`. To publish version 1.0.1:
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 Pushing the tag starts the workflow. When it completes, the release appears on
