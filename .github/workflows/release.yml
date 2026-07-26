@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Verify tag matches the app version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          app_version="$(
+            xcodebuild \
+              -project Timbre.xcodeproj \
+              -scheme Timbre \
+              -configuration Release \
+              -showBuildSettings |
+              awk '/MARKETING_VERSION/ { print $3; exit }'
+          )"
+          tag_version="${RELEASE_TAG#v}"
+          if [[ "$tag_version" != "$app_version" ]]; then
+            echo "::error::Tag $RELEASE_TAG does not match MARKETING_VERSION $app_version"
+            exit 1
+          fi
+
+      - name: Build release app
+        run: |
+          set -euo pipefail
+          xcodebuild build \
+            -project Timbre.xcodeproj \
+            -scheme Timbre \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+          app_path="$RUNNER_TEMP/DerivedData/Build/Products/Release/Timbre.app"
+          codesign --force --deep --sign - "$app_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+
+      - name: Package release
+        run: |
+          set -euo pipefail
+          app_path="$RUNNER_TEMP/DerivedData/Build/Products/Release/Timbre.app"
+          dmg_root="$RUNNER_TEMP/dmg-root"
+          release_dir="$RUNNER_TEMP/release"
+          mkdir -p "$dmg_root" "$release_dir"
+          ditto "$app_path" "$dmg_root/Timbre.app"
+          ln -s /Applications "$dmg_root/Applications"
+          hdiutil create \
+            -volname "Timbre" \
+            -srcfolder "$dmg_root" \
+            -ov \
+            -format UDZO \
+            "$release_dir/Timbre.dmg"
+          cd "$release_dir"
+          shasum -a 256 Timbre.dmg > Timbre.dmg.sha256
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          gh release create "$RELEASE_TAG" \
+            "$RUNNER_TEMP/release/Timbre.dmg" \
+            "$RUNNER_TEMP/release/Timbre.dmg.sha256" \
+            --verify-tag \
+            --generate-notes \
+            --title "Timbre $RELEASE_TAG"
