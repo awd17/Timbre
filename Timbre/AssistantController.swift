@@ -117,6 +117,8 @@ final class AssistantController {
                 }
             )
             guard activeSession?.id == session.id else { return }
+            // Only after capture succeeds. Keep Unchanged is a no-op inside the
+            // playback controller and must not arm mute handlers around mic start.
             if playbackSessionID == session.id {
                 playback.beginListening()
             }

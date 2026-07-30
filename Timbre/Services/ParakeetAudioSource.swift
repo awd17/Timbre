@@ -19,14 +19,12 @@ protocol ParakeetAudioSource: AnyObject {
 final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
     let diagnosticLabel = "microphone"
 
-    private let inputDevices: CoreAudioInputDeviceManager
+    private let capturer: CoreAudioInputCapturer
     private let capture = ParakeetCaptureBuffer()
-    private var audioEngine: AVAudioEngine?
-    private var hasInstalledTap = false
     private(set) var hardwareFormatDescription = "unknown"
 
     init(inputDevices: CoreAudioInputDeviceManager) {
-        self.inputDevices = inputDevices
+        self.capturer = CoreAudioInputCapturer(inputDevices: inputDevices)
     }
 
     func prepareAccess() async throws {
@@ -43,71 +41,37 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
     func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws {
         teardown()
 
-        let engine = AVAudioEngine()
-        let inputNode = engine.inputNode
-        let effectiveDevice = try inputDevices.configureInputNode(inputNode)
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            throw TranscriptionError.audioEngineFailed
-        }
-
-        hardwareFormatDescription =
-            "rate=\(format.sampleRate) channels=\(format.channelCount) commonFormat=\(format.commonFormat.rawValue)"
-        TimbreLog.line(
-            "Timbre Parakeet: pre-start input format \(hardwareFormatDescription); "
-                + "tap uses engine-negotiated native format"
-        )
-        if let effectiveDevice {
-            TimbreLog.line("Timbre Parakeet: effective microphone \(effectiveDevice.name)")
-        }
-
         let captureBuffer = capture
-        let meter = AudioLevelMeter()
-        // A non-nil tap format asks AVFAudio to apply that format to the bus.
-        // The hardware route can settle between outputFormat(forBus:) and tap
-        // installation (for example 24 kHz → 48 kHz), which raises an
-        // Objective-C format-mismatch exception. Let the engine supply its
-        // negotiated native format and resample each delivered buffer.
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
-            captureBuffer.append(buffer)
-            if let level = meter.consume(buffer) {
-                Task { @MainActor in
-                    onAudioLevel(level)
-                }
-            }
-        }
-        hasInstalledTap = true
-        audioEngine = engine
-
-        engine.prepare()
         do {
-            try engine.start()
+            let configuration = try capturer.start(
+                onBuffer: { buffer in
+                    captureBuffer.append(buffer)
+                },
+                onAudioLevel: onAudioLevel
+            )
+            hardwareFormatDescription = configuration.formatDescription
+            TimbreLog.line(
+                "Timbre Parakeet: input-only capture format \(hardwareFormatDescription)"
+            )
+            TimbreLog.line("Timbre Parakeet: effective microphone \(configuration.device.name)")
+            TimbreLog.line("Timbre Parakeet: listening (no live partials).")
         } catch {
             teardown()
+            if error is TranscriptionError {
+                throw error
+            }
             throw TranscriptionError.audioEngineFailed
         }
-
-        TimbreLog.line("Timbre Parakeet: listening (no live partials).")
     }
 
     func finish() throws -> [Float] {
-        removeTapIfNeeded()
-        audioEngine?.stop()
-        audioEngine = nil
+        capturer.stop()
         return capture.finishAndSnapshot()
     }
 
     func teardown() {
-        removeTapIfNeeded()
-        audioEngine?.stop()
-        audioEngine = nil
+        capturer.stop()
         capture.clear()
-    }
-
-    private func removeTapIfNeeded() {
-        guard hasInstalledTap else { return }
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        hasInstalledTap = false
     }
 }
 

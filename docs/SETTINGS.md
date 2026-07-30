@@ -39,17 +39,20 @@ Bluetooth microphone path that reduces playback quality.
 
 Mute operates on the default output's Core Audio mute control; it does not
 capture system audio or require another privacy permission. Outputs without a
-software mute control are left unchanged.
+software mute control are left unchanged. Keep Unchanged never arms a mute
+transaction or output-device handlers. Microphone capture itself is input-only
+HAL IO (no AVAudioEngine output side), so starting dictation should not duck or
+reconfigure AirPods/system playback when Keep Unchanged is selected.
 
 Before changing playback, Timbre writes a restoration record containing the
-output UID, starting state, and applied state. Only a dictation session started
-by Timbre's global hotkey creates this transaction; global microphone and audio
-device notifications never create one. Timbre restores the original mute state
-on stop, output switching, failure, reset, or termination. A later launch also
-recovers an interrupted mute transaction when the output still matches the
-state Timbre applied. Timbre verifies mute briefly while a route settles and
-retries failed restoration writes so Bluetooth and virtual outputs do not
-rebound or remain muted.
+output UID, starting state, and applied state. Only a Mute-mode dictation
+session started by Timbre's global hotkey creates this transaction; Keep
+Unchanged sessions and global microphone/audio device notifications never create
+one. Timbre restores the original mute state on stop, output switching, failure,
+reset, or termination. A later launch also recovers an interrupted mute
+transaction when the output still matches the state Timbre applied. Timbre
+verifies mute briefly while a route settles and retries failed restoration
+writes so Bluetooth and virtual outputs do not rebound or remain muted.
 
 ## Clipboard semantics
 
