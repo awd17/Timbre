@@ -2,26 +2,25 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// Apple Speech + AVAudioEngine transcription. Replaceable via `TranscriptionServicing`.
+/// Apple Speech + input-only HAL capture. Replaceable via `TranscriptionServicing`.
 @MainActor
 final class SpeechRecognitionService: TranscriptionServicing, TerminationHandling {
     private let locale: Locale
     private let speechRecognizer: SFSpeechRecognizer?
-    private let inputDevices: CoreAudioInputDeviceManager
+    private let capturer: CoreAudioInputCapturer
 
     private var session: TranscriptionSession?
-    private var audioEngine: AVAudioEngine?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private var hasInstalledTap = false
     private var stopTimeoutTask: Task<Void, Never>?
+    private var isCapturing = false
 
     init(
         locale: Locale = .current,
         inputDevices: CoreAudioInputDeviceManager
     ) {
         self.locale = locale
-        self.inputDevices = inputDevices
+        self.capturer = CoreAudioInputCapturer(inputDevices: inputDevices)
         self.speechRecognizer = SFSpeechRecognizer(locale: locale)
     }
 
@@ -64,41 +63,21 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
         let sessionID = newSession.id
         session = newSession
 
-        let engine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         if #available(macOS 13, *) {
             request.addsPunctuation = true
         }
-
-        let inputNode = engine.inputNode
-        _ = try inputDevices.configureInputNode(inputNode)
-        let format = inputNode.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
-            await tearDown(invalidateSession: true)
-            throw TranscriptionError.audioEngineFailed
-        }
-
-        // Capture the request locally so the tap never races assignment onto `self`.
-        let meter = AudioLevelMeter()
-        // Do not force the pre-start format onto a route that may still be
-        // settling. A nil format lets AVFAudio deliver the negotiated native
-        // input format without a 24 kHz/48 kHz tap mismatch.
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
-            request.append(buffer)
-            if let level = meter.consume(buffer) {
-                Task { @MainActor in
-                    onAudioLevel(level)
-                }
-            }
-        }
-        hasInstalledTap = true
-        audioEngine = engine
         recognitionRequest = request
 
-        engine.prepare()
         do {
-            try engine.start()
+            _ = try capturer.start(
+                onBuffer: { buffer in
+                    request.append(buffer)
+                },
+                onAudioLevel: onAudioLevel
+            )
+            isCapturing = true
         } catch {
             await tearDown(invalidateSession: true)
             throw TranscriptionError.audioEngineFailed
@@ -146,8 +125,7 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
                 activeSession.beginStopping(continuation)
 
                 recognitionRequest?.endAudio()
-                removeTapIfNeeded()
-                audioEngine?.stop()
+                stopCapture()
 
                 stopTimeoutTask?.cancel()
                 stopTimeoutTask = Task { @MainActor [weak self] in
@@ -191,10 +169,6 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
     deinit {
         stopTimeoutTask?.cancel()
         recognitionTask?.cancel()
-        if hasInstalledTap {
-            audioEngine?.inputNode.removeTap(onBus: 0)
-        }
-        audioEngine?.stop()
     }
 
     // MARK: - Private
@@ -212,18 +186,19 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
             session = nil
         }
 
-        removeTapIfNeeded()
-        audioEngine?.stop()
-        audioEngine = nil
+        stopCapture()
         recognitionRequest = nil
         recognitionTask?.cancel()
         recognitionTask = nil
     }
 
-    private func removeTapIfNeeded() {
-        guard hasInstalledTap else { return }
-        audioEngine?.inputNode.removeTap(onBus: 0)
-        hasInstalledTap = false
+    private func stopCapture() {
+        guard isCapturing else {
+            capturer.stop()
+            return
+        }
+        capturer.stop()
+        isCapturing = false
     }
 
     private func requestSpeechAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {

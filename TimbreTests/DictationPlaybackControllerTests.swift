@@ -129,6 +129,70 @@ final class DictationPlaybackControllerTests: XCTestCase {
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
+    func testKeepUnchangedIgnoresRouteChurnDuringSession() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .keepUnchanged)
+        let hardware = makeHardware()
+        hardware.addDevice(uid: "two", id: 2, mute: false)
+        let controller = makeController(preferences, hardware)
+        let outputProbeCount = hardware.currentDefaultOutputCallCount
+        let muteProbeCount = hardware.canSetMuteCallCount
+
+        controller.beginListening()
+        hardware.changeDefaultOutput(to: "two")
+        hardware.announceDeviceChange()
+        hardware.mutes["one"] = true
+        hardware.announcePlaybackStateChange()
+        controller.endListening()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.mutes["two"], false)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+        XCTAssertEqual(hardware.currentDefaultOutputCallCount, outputProbeCount)
+        XCTAssertEqual(hardware.canSetMuteCallCount, muteProbeCount)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
+    }
+
+    func testKeepUnchangedDoesNotRecoverOrWriteOnStop() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .keepUnchanged)
+        let hardware = makeHardware(mute: true)
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        controller.endListening()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+    }
+
+    func testKeepUnchangedAssistantLifecycleNeverMutes() async {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .keepUnchanged)
+        let hardware = makeHardware()
+        let playback = makeController(preferences, hardware)
+        let assistant = AssistantController(
+            transcription: MockTranscriptionService(
+                behavior: .success(final: "Hello", partials: [])
+            ),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await assistant.startDictationFromShortcut()
+        XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+
+        // Simulate Core Audio churn while the mic is open (preparing→listening).
+        hardware.changeDefaultOutput(to: "one")
+        hardware.announceDeviceChange()
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+
+        await assistant.stopDictation()
+        XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
+    }
+
     func testMuteUsesMuteControlAndRestoresIt() {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
         let hardware = makeHardware()

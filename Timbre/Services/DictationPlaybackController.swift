@@ -267,13 +267,23 @@ final class DictationPlaybackController:
         guard !isListening else { return }
         restorationRetryTask?.cancel()
         restorationRetryTask = nil
-        isListening = true
-        activePlaybackMode = preferences.playbackDuringDictation
-        guard activePlaybackMode != .keepUnchanged else {
+
+        // Snapshot the policy for this hotkey session. Keep Unchanged must not
+        // arm mute transactions or device handlers — mic-open route churn can
+        // otherwise poke output controls and cause a brief audible glitch.
+        let mode = preferences.playbackDuringDictation
+        guard mode == .mute else {
+            activePlaybackMode = nil
             activeDeviceUID = nil
+            // Compare-before-write restore only; never applies a new mute.
+            recoverPendingRecords()
+            scheduleRestorationRetriesIfNeeded()
             refreshSupport()
             return
         }
+
+        activePlaybackMode = mode
+        isListening = true
         recoverPendingRecords()
         applyToCurrentOutput()
     }
@@ -284,8 +294,9 @@ final class DictationPlaybackController:
         hardware.stopMonitoringPlaybackState()
         isListening = false
         activeDeviceUID = nil
-        recoverPendingRecords()
         activePlaybackMode = nil
+        // Safe for Keep Unchanged: restores only hotkey-owned mute records.
+        recoverPendingRecords()
         refreshSupport()
         scheduleRestorationRetriesIfNeeded()
     }
@@ -300,28 +311,28 @@ final class DictationPlaybackController:
     }
 
     private func applyToCurrentOutput() {
+        // Mute writes are only valid while a hotkey-owned mute transaction is
+        // active. Never fall back to the live preference here — a settings
+        // change mid-session must not start muting under Keep Unchanged.
+        guard isListening, activePlaybackMode == .mute else {
+            isCurrentOutputControllable = true
+            return
+        }
         guard let device = hardware.currentDefaultOutput() else {
             isCurrentOutputControllable = false
             return
         }
 
-        let mode = activePlaybackMode ?? preferences.playbackDuringDictation
-        switch mode {
-        case .keepUnchanged:
-            isCurrentOutputControllable = true
+        guard hardware.canSetMute(of: device),
+              let originalMute = hardware.mute(of: device)
+        else {
+            reportUnsupported(
+                "current output cannot be muted in software; leaving playback unchanged."
+            )
             return
-        case .mute:
-            guard hardware.canSetMute(of: device),
-                  let originalMute = hardware.mute(of: device)
-            else {
-                reportUnsupported(
-                    "current output cannot be muted in software; leaving playback unchanged."
-                )
-                return
-            }
-            if !applyMute(startingAt: originalMute, device: device) {
-                reportApplyFailure(mode: mode, status: nil)
-            }
+        }
+        if !applyMute(startingAt: originalMute, device: device) {
+            reportApplyFailure(mode: .mute, status: nil)
         }
     }
 
@@ -432,9 +443,8 @@ final class DictationPlaybackController:
 
     private func handleDefaultOutputChange() {
         // Output notifications can arrive while AVAudioEngine is opening the
-        // microphone. Do not probe output controls until a hotkey-owned mute
-        // transaction is active.
-        guard isListening else { return }
+        // microphone. Only a live mute transaction may touch output controls.
+        guard hasActiveMuteTransaction else { return }
 
         guard let currentDevice = hardware.currentDefaultOutput() else {
             isCurrentOutputControllable = false
@@ -455,9 +465,9 @@ final class DictationPlaybackController:
 
     private func handleDeviceListChange() {
         // Device-list notifications are global and commonly occur while an
-        // app opens a microphone. Idle notifications must not touch output
-        // controls or interfere with input-route negotiation.
-        guard isListening else { return }
+        // app opens a microphone. Idle and Keep Unchanged sessions must not
+        // touch output controls or interfere with input-route negotiation.
+        guard hasActiveMuteTransaction else { return }
 
         if let activeDeviceUID,
            hardware.outputDevice(forUID: activeDeviceUID) == nil {
@@ -473,13 +483,18 @@ final class DictationPlaybackController:
 
     private func handlePlaybackStateChange(for deviceUID: String) {
         guard
-            isListening,
+            hasActiveMuteTransaction,
             activeDeviceUID == deviceUID,
             hardware.currentDefaultOutput()?.uid == deviceUID
         else {
             return
         }
         stabilizePlayback(on: deviceUID)
+    }
+
+    /// True only while mute mode owns the current hotkey listening session.
+    private var hasActiveMuteTransaction: Bool {
+        isListening && activePlaybackMode == .mute
     }
 
     /// Some outputs accept a mute write, report it back, then replace it while
@@ -500,7 +515,7 @@ final class DictationPlaybackController:
                 } catch {
                     return
                 }
-                guard let self, self.isListening,
+                guard let self, self.hasActiveMuteTransaction,
                       self.activeDeviceUID == deviceUID
                 else {
                     return
@@ -512,7 +527,7 @@ final class DictationPlaybackController:
 
     private func stabilizePlayback(on deviceUID: String) {
         guard
-            isListening,
+            hasActiveMuteTransaction,
             activeDeviceUID == deviceUID,
             hardware.currentDefaultOutput()?.uid == deviceUID,
             let device = hardware.outputDevice(forUID: deviceUID),
@@ -525,7 +540,7 @@ final class DictationPlaybackController:
         guard hardware.mute(of: device) != expectedMute else { return }
         let status = hardware.setMute(expectedMute, of: device)
         guard status == noErr, hardware.mute(of: device) == expectedMute else {
-            reportApplyFailure(mode: activePlaybackMode ?? .mute, status: status)
+            reportApplyFailure(mode: .mute, status: status)
             return
         }
         isCurrentOutputControllable = true
