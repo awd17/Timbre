@@ -124,11 +124,13 @@ private final class SuspendingTranscriptionService: TranscriptionServicing {
         case none
         case prepare
         case stop
+        case cancel
     }
 
     private let suspension: Suspension
     private var prepareContinuation: CheckedContinuation<Void, Never>?
     private var stopContinuation: CheckedContinuation<String, Error>?
+    private var cancelContinuation: CheckedContinuation<Void, Never>?
     private var partialHandler: (@MainActor (String) -> Void)?
     private var audioLevelHandler: (@MainActor (Float) -> Void)?
     private(set) var prepareCallCount = 0
@@ -167,6 +169,10 @@ private final class SuspendingTranscriptionService: TranscriptionServicing {
 
     func cancel() async {
         cancelCallCount += 1
+        guard suspension == .cancel else { return }
+        await withCheckedContinuation { continuation in
+            cancelContinuation = continuation
+        }
     }
 
     func resumePreparation() {
@@ -177,6 +183,11 @@ private final class SuspendingTranscriptionService: TranscriptionServicing {
     func resumeStop(with transcript: String) {
         stopContinuation?.resume(returning: transcript)
         stopContinuation = nil
+    }
+
+    func resumeCancellation() {
+        cancelContinuation?.resume()
+        cancelContinuation = nil
     }
 
     func emitDetectedSpeech() {
@@ -284,6 +295,40 @@ final class AssistantControllerTests: XCTestCase {
         XCTAssertEqual(transcription.cancelCallCount, 1)
         XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
         XCTAssertNil(controller.lastCompletedTranscript)
+    }
+
+    func testImmediateRestartWaitsForPreviousCancellationCleanup() async {
+        let transcription = SuspendingTranscriptionService(suspension: .cancel)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        XCTAssertEqual(transcription.prepareCallCount, 1)
+        XCTAssertEqual(transcription.startCallCount, 1)
+
+        let cancelTask = controller.cancelDictation()
+        await waitUntil { transcription.cancelCallCount == 1 }
+        let restartTask = controller.beginDictation()
+
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(controller.sessionState, .preparing)
+        XCTAssertEqual(transcription.prepareCallCount, 1)
+        XCTAssertEqual(transcription.startCallCount, 1)
+
+        transcription.resumeCancellation()
+        await cancelTask?.value
+        await restartTask?.value
+
+        XCTAssertEqual(controller.sessionState, .listening(transcript: ""))
+        XCTAssertEqual(transcription.prepareCallCount, 2)
+        XCTAssertEqual(transcription.startCallCount, 2)
     }
 
     func testCancelWhileFinishingDiscardsLateFinalTranscript() async {

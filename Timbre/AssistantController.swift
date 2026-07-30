@@ -20,6 +20,7 @@ final class AssistantController {
     private let targetProvider: any DictationTargetProviding
     private let playback: any DictationPlaybackControlling
     private var playbackSessionID: UUID?
+    private var transcriptionCleanupTask: Task<Void, Never>?
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
@@ -90,6 +91,14 @@ final class AssistantController {
     }
 
     private func prepareAndStart(_ session: DictationSessionContext) async {
+        // The transcription service owns one shared microphone session. A
+        // replacement session must not enter it until every earlier
+        // cancellation has finished tearing down that shared state.
+        if let transcriptionCleanupTask {
+            await transcriptionCleanupTask.value
+        }
+        guard activeSession?.id == session.id else { return }
+
         do {
             try await transcription.prepare()
             guard activeSession?.id == session.id else { return }
@@ -187,15 +196,20 @@ final class AssistantController {
     func cancelDictation() -> Task<Void, Never>? {
         guard let session = activeSession else { return nil }
 
+        let previousCleanupTask = transcriptionCleanupTask
+        let cleanupTask = Task { [transcription] in
+            await previousCleanupTask?.value
+            await transcription.cancel()
+        }
+        transcriptionCleanupTask = cleanupTask
+
         activeSession = nil
         audioLevel = 0
         endPlayback(for: session)
         sessionState = .idle
         TimbreLog.line("Timbre dictation: cancelled.")
 
-        return Task { [transcription] in
-            await transcription.cancel()
-        }
+        return cleanupTask
     }
 
     func copyLastTranscript() {

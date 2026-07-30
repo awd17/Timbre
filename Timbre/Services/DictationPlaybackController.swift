@@ -330,6 +330,13 @@ final class DictationPlaybackController:
         device: AudioOutputDevice
     ) -> Bool {
         if originalMute {
+            upsert(
+                MuteRestorationRecord(
+                    deviceUID: device.uid,
+                    originalMute: originalMute,
+                    appliedMute: true
+                )
+            )
             markApplied(to: device)
             return true
         }
@@ -410,6 +417,9 @@ final class DictationPlaybackController:
         {
             guard let currentMute = hardware.mute(of: device) else { return true }
             guard currentMute == appliedMute else {
+                return true
+            }
+            guard currentMute != originalMute else {
                 return true
             }
             guard hardware.setMute(originalMute, of: device) == noErr else {

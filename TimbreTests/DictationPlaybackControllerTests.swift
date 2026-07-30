@@ -149,10 +149,32 @@ final class DictationPlaybackControllerTests: XCTestCase {
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
+        XCTAssertNotNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
         controller.endListening()
 
         XCTAssertEqual(hardware.mutes["one"], true)
         XCTAssertTrue(hardware.muteWrites.isEmpty)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
+    }
+
+    func testInitiallyMutedOutputIsRemutedIfRouteSettlesUnmuted() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware(mute: true)
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        hardware.mutes["one"] = false
+        hardware.announcePlaybackStateChange()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 1)
+        XCTAssertEqual(hardware.muteWrites.first?.0, "one")
+        XCTAssertEqual(hardware.muteWrites.first?.1, true)
+
+        controller.endListening()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 1)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
