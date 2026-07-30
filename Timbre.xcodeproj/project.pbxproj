@@ -33,7 +33,7 @@
 		97516C50300C400100000001 /* TimbreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimbreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		97516C60300C400100000011 /* TimbreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimbreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		97516C71300C500100000002 /* ParakeetSmokeTest */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ParakeetSmokeTest; sourceTree = BUILT_PRODUCTS_DIR; };
-		97EC226D300C275500E4A542 /* Timbre.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Timbre.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		97EC226D300C275500E4A542 /* Timbre Debug.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Timbre Debug.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -127,7 +127,7 @@
 		97EC226E300C275500E4A542 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				97EC226D300C275500E4A542 /* Timbre.app */,
+				97EC226D300C275500E4A542 /* Timbre Debug.app */,
 				97516C50300C400100000001 /* TimbreTests.xctest */,
 				97516C60300C400100000011 /* TimbreUITests.xctest */,
 				97516C71300C500100000002 /* ParakeetSmokeTest */,
@@ -229,7 +229,7 @@
 				97516C8B300C700100000001 /* KeyboardShortcuts */,
 			);
 			productName = Timbre;
-			productReference = 97EC226D300C275500E4A542 /* Timbre.app */;
+			productReference = 97EC226D300C275500E4A542 /* Timbre Debug.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -595,7 +595,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.Timbre.debug;
 				PRODUCT_MODULE_NAME = Timbre;
 				PRODUCT_NAME = "Timbre Debug";
@@ -627,7 +627,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.Timbre;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
