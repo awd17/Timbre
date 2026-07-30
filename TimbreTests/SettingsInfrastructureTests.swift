@@ -23,7 +23,7 @@ final class AppPreferencesTests: XCTestCase {
             uid: "test-microphone",
             name: "Test Microphone"
         )
-        preferences.playbackDuringDictation = .lower
+        preferences.playbackDuringDictation = .mute
 
         let reloaded = UserDefaultsAppPreferences(defaults: defaults)
         XCTAssertTrue(reloaded.keepTranscriptOnClipboardAfterInsertion)
@@ -32,7 +32,23 @@ final class AppPreferencesTests: XCTestCase {
             reloaded.microphoneSelection,
             .device(uid: "test-microphone", name: "Test Microphone")
         )
-        XCTAssertEqual(reloaded.playbackDuringDictation, .lower)
+        XCTAssertEqual(reloaded.playbackDuringDictation, .mute)
+    }
+
+    func testRemovedLowerPreferenceFallsBackAndIsCleared() throws {
+        let suiteName = "TimbreRemovedPlaybackPreferenceTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("lower", forKey: UserDefaultsAppPreferences.playbackDuringDictationKey)
+
+        let preferences = UserDefaultsAppPreferences(defaults: defaults)
+
+        XCTAssertEqual(preferences.playbackDuringDictation, .keepUnchanged)
+        XCTAssertNil(
+            defaults.object(
+                forKey: UserDefaultsAppPreferences.playbackDuringDictationKey
+            )
+        )
     }
 
     func testDistinctChangesPublishOnce() {

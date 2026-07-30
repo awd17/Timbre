@@ -11,7 +11,7 @@ visibility is enabled. Repeated actions focus the same window.
 | Dictation shortcut | Existing `⌃⇧D` default | Required for dictation and shared with onboarding. Clearing is a temporary editing state; closing Settings without a replacement restores the previous shortcut. |
 | Microphone input | System Default | Stores a stable Core Audio device UID. A disconnected saved microphone falls back to the current macOS default without forgetting the choice and is reused when it reconnects. |
 | Show Timbre in Dock | Off | Switches Timbre between regular and accessory activation policy immediately. The menu-bar item remains available. |
-| Playback while listening | Keep Unchanged | Can leave playback alone, lower the default output to 25% of its starting volume, or mute it until listening ends. |
+| Playback while listening | Keep Unchanged | After Timbre's global dictation hotkey starts listening, can leave playback alone or mute it until listening ends. Other microphone activity never triggers it. |
 | Keep transcript on clipboard | Off | Leaves a successfully inserted transcript on the clipboard when enabled. |
 
 The Overlay section can clear the saved panel placement and immediately move an
@@ -37,15 +37,19 @@ remains visible as unavailable while Timbre uses System Default. Selecting the
 Mac or a USB microphone while AirPods remain the output avoids activating the
 Bluetooth microphone path that reduces playback quality.
 
-Lower and Mute operate on the default output's Core Audio virtual main volume or
-mute control; they do not capture system audio or require another privacy
-permission. Outputs with fixed or externally managed volume are left unchanged.
+Mute operates on the default output's Core Audio mute control; it does not
+capture system audio or require another privacy permission. Outputs without a
+software mute control are left unchanged.
 
 Before changing playback, Timbre writes a restoration record containing the
-output UID, starting state, and applied state. Playback is restored on stop,
-failure, output switching, reset, and termination. A later launch also recovers
-an interrupted session, but only if the output still matches Timbre's applied
-state, so a manual volume adjustment is never overwritten.
+output UID, starting state, and applied state. Only a dictation session started
+by Timbre's global hotkey creates this transaction; global microphone and audio
+device notifications never create one. Timbre restores the original mute state
+on stop, output switching, failure, reset, or termination. A later launch also
+recovers an interrupted mute transaction when the output still matches the
+state Timbre applied. Timbre verifies mute briefly while a route settles and
+retries failed restoration writes so Bluetooth and virtual outputs do not
+rebound or remain muted.
 
 ## Clipboard semantics
 

@@ -55,7 +55,7 @@ final class DictationShortcutCoordinator {
 
         switch action {
         case .start:
-            controller.beginDictation()
+            controller.beginDictationFromShortcut()
         case .stop:
             Task { await controller.stopDictation() }
         case .presentSetup:

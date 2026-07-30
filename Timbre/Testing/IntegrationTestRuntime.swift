@@ -204,6 +204,8 @@ private extension TranscriptDeliveryResult {
             case .emptyTranscript:
                 return "failed.emptyTranscript"
             }
+        case .cancelled:
+            return "cancelled"
         }
     }
 }
@@ -751,9 +753,14 @@ final class IntegrationRecordingDelivery: TranscriptDeliveryServicing {
 
     func deliver(
         _ transcript: String,
-        to target: DictationTargetContext?
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult {
-        let result = await base.deliver(transcript, to: target)
+        let result = await base.deliver(
+            transcript,
+            to: target,
+            cancellation: cancellation
+        )
         probe.recordDeliveryResult(result)
         return result
     }

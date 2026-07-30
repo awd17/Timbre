@@ -31,12 +31,41 @@ final class FakeTranscriptDelivery: TranscriptDeliveryServicing {
 
     func deliver(
         _ transcript: String,
-        to target: DictationTargetContext?
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult {
+        guard !cancellation.isCancelled else { return .cancelled }
         deliveredTranscripts.append(transcript)
         deliveredTargets.append(target)
         clipboard?.copy(transcript)
         return result
+    }
+}
+
+@MainActor
+private final class SuspendingTranscriptDelivery: TranscriptDeliveryServicing {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var callCount = 0
+    private(set) var deliveredTranscripts: [String] = []
+
+    func deliver(
+        _ transcript: String,
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
+    ) async -> TranscriptDeliveryResult {
+        _ = target
+        callCount += 1
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        guard !cancellation.isCancelled else { return .cancelled }
+        deliveredTranscripts.append(transcript)
+        return .pasteEventPosted
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -48,6 +77,8 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
     private(set) var captureCallCount = 0
     private(set) var activateCallCount = 0
     var activateSucceeds = true
+    var suspendsActivation = false
+    private var activationContinuation: CheckedContinuation<Void, Never>?
 
     func captureTarget() -> DictationTargetContext? {
         captureCallCount += 1
@@ -60,11 +91,21 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
 
     func activateTarget(_ target: DictationTargetContext) async -> Bool {
         activateCallCount += 1
+        if suspendsActivation {
+            await withCheckedContinuation { continuation in
+                activationContinuation = continuation
+            }
+        }
         if activateSucceeds {
             frontmostExternal = target
             isSelfFrontmost = false
         }
         return activateSucceeds
+    }
+
+    func resumeActivation() {
+        activationContinuation?.resume()
+        activationContinuation = nil
     }
 }
 
@@ -119,6 +160,84 @@ private final class RetainedLevelTranscriptionService: TranscriptionServicing {
 }
 
 @MainActor
+private final class SuspendingTranscriptionService: TranscriptionServicing {
+    enum Suspension {
+        case none
+        case prepare
+        case stop
+        case cancel
+    }
+
+    private let suspension: Suspension
+    private var prepareContinuation: CheckedContinuation<Void, Never>?
+    private var stopContinuation: CheckedContinuation<String, Error>?
+    private var cancelContinuation: CheckedContinuation<Void, Never>?
+    private var partialHandler: (@MainActor (String) -> Void)?
+    private var audioLevelHandler: (@MainActor (Float) -> Void)?
+    private(set) var prepareCallCount = 0
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var cancelCallCount = 0
+
+    init(suspension: Suspension) {
+        self.suspension = suspension
+    }
+
+    func prepare() async throws {
+        prepareCallCount += 1
+        guard suspension == .prepare else { return }
+        await withCheckedContinuation { continuation in
+            prepareContinuation = continuation
+        }
+    }
+
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
+        startCallCount += 1
+        partialHandler = onPartialResult
+        audioLevelHandler = onAudioLevel
+    }
+
+    func stop() async throws -> String {
+        stopCallCount += 1
+        guard suspension == .stop else { return "Already detected" }
+        return try await withCheckedThrowingContinuation { continuation in
+            stopContinuation = continuation
+        }
+    }
+
+    func cancel() async {
+        cancelCallCount += 1
+        guard suspension == .cancel else { return }
+        await withCheckedContinuation { continuation in
+            cancelContinuation = continuation
+        }
+    }
+
+    func resumePreparation() {
+        prepareContinuation?.resume()
+        prepareContinuation = nil
+    }
+
+    func resumeStop(with transcript: String) {
+        stopContinuation?.resume(returning: transcript)
+        stopContinuation = nil
+    }
+
+    func resumeCancellation() {
+        cancelContinuation?.resume()
+        cancelContinuation = nil
+    }
+
+    func emitDetectedSpeech() {
+        partialHandler?("Already detected")
+        audioLevelHandler?(0.7)
+    }
+}
+
+@MainActor
 final class AssistantControllerTests: XCTestCase {
     func testPlaybackAttenuationMatchesListeningLifecycle() async {
         let playback = FakeDictationPlaybackController()
@@ -132,12 +251,184 @@ final class AssistantControllerTests: XCTestCase {
             playback: playback
         )
 
-        await controller.startDictation()
+        await controller.startDictationFromShortcut()
         XCTAssertEqual(playback.beginCount, 1)
         XCTAssertEqual(playback.endCount, 0)
 
         await controller.stopDictation()
         XCTAssertEqual(playback.endCount, 1)
+    }
+
+    func testProgrammaticDictationNeverAdjustsPlayback() async {
+        let playback = FakeDictationPlaybackController()
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(
+                behavior: .success(final: "Hello", partials: [])
+            ),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await controller.startDictation()
+        await controller.stopDictation()
+
+        XCTAssertEqual(playback.beginCount, 0)
+        XCTAssertEqual(playback.endCount, 0)
+    }
+
+    func testCancelDuringPreparingHidesImmediatelyAndPreventsCaptureStart() async {
+        let transcription = SuspendingTranscriptionService(suspension: .prepare)
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        let startTask = controller.beginDictationFromShortcut()
+        await waitUntil { transcription.prepareCallCount == 1 }
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+        XCTAssertFalse(controller.canCancel)
+
+        transcription.resumePreparation()
+        await startTask?.value
+        await cancelTask?.value
+
+        XCTAssertEqual(transcription.startCallCount, 0)
+        XCTAssertEqual(transcription.cancelCallCount, 1)
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+    }
+
+    func testCancelAfterPartialSpeechDiscardsTranscriptAndRestoresPlayback() async {
+        let transcription = SuspendingTranscriptionService(suspension: .none)
+        let playback = FakeDictationPlaybackController()
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await controller.startDictationFromShortcut()
+        transcription.emitDetectedSpeech()
+        XCTAssertEqual(
+            controller.sessionState,
+            .listening(transcript: "Already detected")
+        )
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertEqual(controller.audioLevel, 0)
+        XCTAssertNil(controller.activeSession)
+        XCTAssertEqual(playback.endCount, 1)
+
+        await cancelTask?.value
+        XCTAssertEqual(transcription.cancelCallCount, 1)
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
+    }
+
+    func testImmediateRestartWaitsForPreviousCancellationCleanup() async {
+        let transcription = SuspendingTranscriptionService(suspension: .cancel)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        XCTAssertEqual(transcription.prepareCallCount, 1)
+        XCTAssertEqual(transcription.startCallCount, 1)
+
+        let cancelTask = controller.cancelDictation()
+        await waitUntil { transcription.cancelCallCount == 1 }
+        let restartTask = controller.beginDictation()
+
+        for _ in 0..<10 {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(controller.sessionState, .preparing)
+        XCTAssertEqual(transcription.prepareCallCount, 1)
+        XCTAssertEqual(transcription.startCallCount, 1)
+
+        transcription.resumeCancellation()
+        await cancelTask?.value
+        await restartTask?.value
+
+        XCTAssertEqual(controller.sessionState, .listening(transcript: ""))
+        XCTAssertEqual(transcription.prepareCallCount, 2)
+        XCTAssertEqual(transcription.startCallCount, 2)
+    }
+
+    func testCancelWhileFinishingDiscardsLateFinalTranscript() async {
+        let transcription = SuspendingTranscriptionService(suspension: .stop)
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        transcription.emitDetectedSpeech()
+        let stopTask = Task { await controller.stopDictation() }
+        await waitUntil { transcription.stopCallCount == 1 }
+        XCTAssertEqual(
+            controller.sessionState,
+            .finishing(transcript: "Already detected")
+        )
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+
+        transcription.resumeStop(with: "Late final transcript")
+        await stopTask.value
+        await cancelTask?.value
+
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
+    }
+
+    func testCancelWhileDeliveryIsSuspendedPreventsDeliverySideEffect() async {
+        let transcription = SuspendingTranscriptionService(suspension: .none)
+        let delivery = SuspendingTranscriptDelivery()
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        let stopTask = Task { await controller.stopDictation() }
+        await waitUntil { delivery.callCount == 1 }
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+
+        delivery.resume()
+        await stopTask.value
+        await cancelTask?.value
+
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
     }
 
     func testTerminationSynchronouslyShutsDownPlayback() {

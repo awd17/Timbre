@@ -10,7 +10,9 @@ struct TimbreApp: App {
         MenuBarExtra {
             appDelegate.menuContent
         } label: {
-            Label("Timbre", systemImage: "waveform")
+            Image("MenuBarIcon")
+                .renderingMode(.template)
+                .accessibilityLabel("Timbre")
                 .accessibilityIdentifier("timbreStatusItem")
                 .background(
                     SettingsOpenActionBridge(

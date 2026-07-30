@@ -81,7 +81,10 @@ final class SpeechRecognitionService: TranscriptionServicing, TerminationHandlin
 
         // Capture the request locally so the tap never races assignment onto `self`.
         let meter = AudioLevelMeter()
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        // Do not force the pre-start format onto a route that may still be
+        // settling. A nil format lets AVFAudio deliver the negotiated native
+        // input format without a 24 kHz/48 kHz tap mismatch.
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
             request.append(buffer)
             if let level = meter.consume(buffer) {
                 Task { @MainActor in

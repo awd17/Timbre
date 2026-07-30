@@ -16,8 +16,8 @@ protocol AccessibilityPermissionProviding: AnyObject {
     /// Never treat as proof of denial or of readiness.
     var hasOfferedPrompt: Bool { get }
 
-    /// Offers the system prompt when not trusted and not yet offered; records that an offer was made.
-    /// Does not re-prompt aggressively after an offer while still notTrusted.
+    /// Offers/registers the current executable when not trusted and records that
+    /// an offer was made. Called only from an explicit onboarding action.
     func requestAccessIfNeeded() async -> AccessibilityTrustState
 
     func openSystemSettings()
@@ -28,13 +28,27 @@ final class AccessibilityPermissionService: AccessibilityPermissionProviding {
     static let offeredPromptKey = "timbre.hasOfferedAccessibilityPrompt"
 
     private let defaults: UserDefaults
+    private let isProcessTrusted: () -> Bool
+    private let requestSystemPrompt: () -> Void
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        isProcessTrusted: @escaping () -> Bool = {
+            AXIsProcessTrusted()
+        },
+        requestSystemPrompt: @escaping () -> Void = {
+            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            let options = [promptKey: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        }
+    ) {
         self.defaults = defaults
+        self.isProcessTrusted = isProcessTrusted
+        self.requestSystemPrompt = requestSystemPrompt
     }
 
     var trustState: AccessibilityTrustState {
-        AXIsProcessTrusted() ? .trusted : .notTrusted
+        isProcessTrusted() ? .trusted : .notTrusted
     }
 
     var hasOfferedPrompt: Bool {
@@ -46,12 +60,11 @@ final class AccessibilityPermissionService: AccessibilityPermissionProviding {
             return .trusted
         }
 
-        if !hasOfferedPrompt {
-            defaults.set(true, forKey: Self.offeredPromptKey)
-            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-            let options = [promptKey: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-        }
+        // This method is only reached from an explicit onboarding action.
+        // Invoke the system API every time so removing a stale/incorrect TCC
+        // row and pressing Try Again re-registers this exact executable.
+        defaults.set(true, forKey: Self.offeredPromptKey)
+        requestSystemPrompt()
 
         return trustState
     }

@@ -297,7 +297,7 @@ struct SetupFlowView: View {
     private var textInsertionDenied: some View {
         stepScaffold(
             title: "Text Insertion",
-            subtitle: "Text insertion access is turned off. Enable Timbre in System Settings to continue.",
+            subtitle: "Text insertion access is turned off. Enable \(applicationDisplayName) in System Settings to continue.",
             hero: { symbolHero("character.cursor.ibeam") },
             footer: {
                 HStack(spacing: 10) {
@@ -316,6 +316,12 @@ struct SetupFlowView: View {
                 }
             }
         )
+    }
+
+    private var applicationDisplayName: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String
+            ?? "Timbre"
     }
 
     private var preparing: some View {

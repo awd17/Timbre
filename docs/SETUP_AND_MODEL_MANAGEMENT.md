@@ -75,6 +75,10 @@ After readiness is restored, the temporary setup command disappears without a
 relaunch.
 
 `applicationDidBecomeActive` refreshes cache, microphone, and Accessibility trust so revoke/re-grant and deleted caches update the menu while Timbre stays open.
+Setup also performs a short series of read-only Accessibility rechecks after
+AppKit finishes launching. This handles Xcode-launched debug builds where an
+already-granted process can transiently report untrusted during app-delegate
+construction, without displaying another prompt or requiring a relaunch.
 
 ```text
 Welcome → Shortcut → Microphone → Text Insertion → Preparing → Ready
@@ -144,6 +148,16 @@ xcodebuild -scheme Timbre -configuration Release -destination 'platform=macOS' b
 
 Walk: setup appears → choose shortcut → grant mic → Allow Text Insertion → prepare → optionally close window → Ready → Done → Start/Stop dictation → text inserted (and on clipboard).
 Pass DEBUG-only flags to the Release binary and confirm they do not change the backend or bypass setup.
+
+Xcode Debug builds intentionally use `com.augustdrakton.Timbre.debug` and
+display as **Timbre Debug**. This gives the Apple Development-signed executable
+its own Accessibility and microphone rows instead of colliding with an
+installed release named Timbre:
+
+```bash
+tccutil reset Microphone com.augustdrakton.Timbre.debug
+tccutil reset Accessibility com.augustdrakton.Timbre.debug
+```
 
 ## DEBUG setup bypass
 

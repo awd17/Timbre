@@ -61,6 +61,8 @@ tccutil reset Accessibility com.augustdrakton.Timbre
 ```
 
 (Use the app’s actual bundle identifier if it differs in your signing setup.)
+Xcode Debug builds use `com.augustdrakton.Timbre.debug` and appear in System
+Settings as **Timbre Debug**, separately from an installed release.
 
 Granting Accessibility should restore readiness without redownloading the model. Recheck on `applicationDidBecomeActive`. Whether trust applies without relaunch depends on the OS build; Timbre always re-reads live trust when active.
 

@@ -5,6 +5,9 @@ Developer notes for Timbre’s system-wide Start/Stop hotkey.
 ## Status
 
 - Toggle hotkey is wired through `DictationShortcutCoordinator` into the existing `AssistantController` workflow.
+- `Escape` cancels Preparing, Listening, or Processing immediately, restores any
+  hotkey-owned playback change, discards captured speech, and never calls text
+  delivery for that session.
 - Temporary pre-release default: **Control+Shift+D** (`⌃⇧D`).
 - First-run onboarding presents `KeyboardShortcuts.Recorder` for `.toggleDictation` so the user can confirm or replace the shortcut.
 - Confirmation is tracked separately as `timbre.hasCompletedShortcutOnboarding` (see [`ONBOARDING_UX.md`](ONBOARDING_UX.md)).

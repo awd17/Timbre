@@ -562,6 +562,24 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
     }
 
+    func testVisibleSetupDetectsAccessibilityGrantWithoutReactivation() async {
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let accessibility = FakeAccessibilityPermission(trustState: .notTrusted)
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
+        XCTAssertEqual(coordinator.step, .textInsertion)
+
+        coordinator.markWindowVisible(true)
+        accessibility.trustState = .trusted
+
+        await waitUntil { coordinator.step == .ready }
+        XCTAssertTrue(coordinator.allowsDictation)
+        XCTAssertEqual(accessibility.requestCallCount, 0)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        coordinator.markWindowVisible(false)
+    }
+
     func testAccessibilityRevokeUpdatesReadinessWithoutClearingInstall() {
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
