@@ -88,7 +88,11 @@ Start and Stop may come from the menu or the global shortcut (`⌃⇧D`; see [`G
 
 Permissions: **microphone** and **Accessibility** (no Speech Recognition authorization on the production path).
 
-Capture uses `AVAudioEngine` with a serial queue for converted mono Float32 @ 16 kHz samples. On Stop: remove tap → stop engine → drain queue → immutable snapshot → clear → transcribe.
+Capture lets `AVAudioEngine` negotiate the tap's native input format, then uses
+a serial queue to convert each delivered buffer to mono Float32 @ 16 kHz. It
+does not force a format read before the hardware route finishes settling. On
+Stop: remove tap → stop engine → drain queue → immutable snapshot → clear →
+transcribe.
 
 ## Minimum recording length (experimental)
 

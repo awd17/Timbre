@@ -12,6 +12,8 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
     var muteWrites: [(String, Bool)] = []
     var muteWriteStatuses: [OSStatus] = []
     private(set) var stopMonitoringCount = 0
+    private(set) var currentDefaultOutputCallCount = 0
+    private(set) var canSetMuteCallCount = 0
 
     private var onDevicesChanged: (@MainActor () -> Void)?
     private var onDefaultOutputChanged: (@MainActor () -> Void)?
@@ -31,7 +33,8 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
     }
 
     func currentDefaultOutput() -> AudioOutputDevice? {
-        defaultUID.flatMap { devices[$0] }
+        currentDefaultOutputCallCount += 1
+        return defaultUID.flatMap { devices[$0] }
     }
 
     func outputDevice(forUID uid: String) -> AudioOutputDevice? {
@@ -43,7 +46,8 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
     }
 
     func canSetMute(of device: AudioOutputDevice) -> Bool {
-        muteSettable.contains(device.uid)
+        canSetMuteCallCount += 1
+        return muteSettable.contains(device.uid)
     }
 
     func setMute(_ muted: Bool, of device: AudioOutputDevice) -> OSStatus {
@@ -199,12 +203,16 @@ final class DictationPlaybackControllerTests: XCTestCase {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
         let hardware = makeHardware()
         let controller = makeController(preferences, hardware)
+        let outputProbeCount = hardware.currentDefaultOutputCallCount
+        let muteProbeCount = hardware.canSetMuteCallCount
 
         hardware.changeDefaultOutput(to: "one")
         hardware.announceDeviceChange()
 
         XCTAssertEqual(hardware.mutes["one"], false)
         XCTAssertTrue(hardware.muteWrites.isEmpty)
+        XCTAssertEqual(hardware.currentDefaultOutputCallCount, outputProbeCount)
+        XCTAssertEqual(hardware.canSetMuteCallCount, muteProbeCount)
         withExtendedLifetime(controller) {}
     }
 

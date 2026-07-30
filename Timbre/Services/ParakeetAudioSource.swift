@@ -53,14 +53,22 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
 
         hardwareFormatDescription =
             "rate=\(format.sampleRate) channels=\(format.channelCount) commonFormat=\(format.commonFormat.rawValue)"
-        TimbreLog.line("Timbre Parakeet: hardware input format \(hardwareFormatDescription)")
+        TimbreLog.line(
+            "Timbre Parakeet: pre-start input format \(hardwareFormatDescription); "
+                + "tap uses engine-negotiated native format"
+        )
         if let effectiveDevice {
             TimbreLog.line("Timbre Parakeet: effective microphone \(effectiveDevice.name)")
         }
 
         let captureBuffer = capture
         let meter = AudioLevelMeter()
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
+        // A non-nil tap format asks AVFAudio to apply that format to the bus.
+        // The hardware route can settle between outputFormat(forBus:) and tap
+        // installation (for example 24 kHz → 48 kHz), which raises an
+        // Objective-C format-mismatch exception. Let the engine supply its
+        // negotiated native format and resample each delivered buffer.
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { buffer, _ in
             captureBuffer.append(buffer)
             if let level = meter.consume(buffer) {
                 Task { @MainActor in

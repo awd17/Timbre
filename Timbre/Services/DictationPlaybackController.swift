@@ -83,7 +83,7 @@ final class CoreAudioOutputHardware: AudioOutputHardwareProviding {
         CoreAudioHardware.propertyIsSettable(
             objectID: device.audioDeviceID,
             selector: kAudioDevicePropertyMute
-        ) && mute(of: device) != nil
+        )
     }
 
     func setMute(_ muted: Bool, of device: AudioOutputDevice) -> OSStatus {
@@ -421,10 +421,10 @@ final class DictationPlaybackController:
     }
 
     private func handleDefaultOutputChange() {
-        guard isListening else {
-            refreshSupport()
-            return
-        }
+        // Output notifications can arrive while AVAudioEngine is opening the
+        // microphone. Do not probe output controls until a hotkey-owned mute
+        // transaction is active.
+        guard isListening else { return }
 
         guard let currentDevice = hardware.currentDefaultOutput() else {
             isCurrentOutputControllable = false
@@ -444,13 +444,10 @@ final class DictationPlaybackController:
     }
 
     private func handleDeviceListChange() {
-        guard isListening else {
-            // Device-list notifications are global and commonly occur when
-            // another app opens a microphone. They must never cause Timbre to
-            // write playback state while no hotkey session is active.
-            refreshSupport()
-            return
-        }
+        // Device-list notifications are global and commonly occur while an
+        // app opens a microphone. Idle notifications must not touch output
+        // controls or interfere with input-route negotiation.
+        guard isListening else { return }
 
         if let activeDeviceUID,
            hardware.outputDevice(forUID: activeDeviceUID) == nil {
