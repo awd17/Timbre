@@ -31,12 +31,41 @@ final class FakeTranscriptDelivery: TranscriptDeliveryServicing {
 
     func deliver(
         _ transcript: String,
-        to target: DictationTargetContext?
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult {
+        guard !cancellation.isCancelled else { return .cancelled }
         deliveredTranscripts.append(transcript)
         deliveredTargets.append(target)
         clipboard?.copy(transcript)
         return result
+    }
+}
+
+@MainActor
+private final class SuspendingTranscriptDelivery: TranscriptDeliveryServicing {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private(set) var callCount = 0
+    private(set) var deliveredTranscripts: [String] = []
+
+    func deliver(
+        _ transcript: String,
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
+    ) async -> TranscriptDeliveryResult {
+        _ = target
+        callCount += 1
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        guard !cancellation.isCancelled else { return .cancelled }
+        deliveredTranscripts.append(transcript)
+        return .pasteEventPosted
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
     }
 }
 
@@ -48,6 +77,8 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
     private(set) var captureCallCount = 0
     private(set) var activateCallCount = 0
     var activateSucceeds = true
+    var suspendsActivation = false
+    private var activationContinuation: CheckedContinuation<Void, Never>?
 
     func captureTarget() -> DictationTargetContext? {
         captureCallCount += 1
@@ -60,11 +91,21 @@ final class FakeDictationTargetProvider: DictationTargetProviding {
 
     func activateTarget(_ target: DictationTargetContext) async -> Bool {
         activateCallCount += 1
+        if suspendsActivation {
+            await withCheckedContinuation { continuation in
+                activationContinuation = continuation
+            }
+        }
         if activateSucceeds {
             frontmostExternal = target
             isSelfFrontmost = false
         }
         return activateSucceeds
+    }
+
+    func resumeActivation() {
+        activationContinuation?.resume()
+        activationContinuation = nil
     }
 }
 
@@ -356,6 +397,33 @@ final class AssistantControllerTests: XCTestCase {
         XCTAssertNil(controller.activeSession)
 
         transcription.resumeStop(with: "Late final transcript")
+        await stopTask.value
+        await cancelTask?.value
+
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
+    }
+
+    func testCancelWhileDeliveryIsSuspendedPreventsDeliverySideEffect() async {
+        let transcription = SuspendingTranscriptionService(suspension: .none)
+        let delivery = SuspendingTranscriptDelivery()
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        let stopTask = Task { await controller.stopDictation() }
+        await waitUntil { delivery.callCount == 1 }
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+
+        delivery.resume()
         await stopTask.value
         await cancelTask?.value
 

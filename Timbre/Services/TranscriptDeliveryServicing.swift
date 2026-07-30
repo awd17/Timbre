@@ -22,14 +22,43 @@ enum TranscriptDeliveryResult: Equatable, Sendable {
     case copiedByDesign
     case copiedAfterInsertFailure(CopyFallbackReason)
     case failed(TranscriptDeliveryFailure)
+    case cancelled
+}
+
+/// Session-scoped authorization checked immediately before delivery side effects.
+///
+/// Delivery implementations may suspend while validating or activating a
+/// target. They must re-check this token after suspension and before writing
+/// to the clipboard or posting paste events.
+@MainActor
+final class TranscriptDeliveryCancellationToken {
+    private(set) var isCancelled = false
+
+    func cancel() {
+        isCancelled = true
+    }
 }
 
 @MainActor
 protocol TranscriptDeliveryServicing {
     func deliver(
         _ transcript: String,
-        to target: DictationTargetContext?
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult
+}
+
+extension TranscriptDeliveryServicing {
+    func deliver(
+        _ transcript: String,
+        to target: DictationTargetContext?
+    ) async -> TranscriptDeliveryResult {
+        await deliver(
+            transcript,
+            to: target,
+            cancellation: TranscriptDeliveryCancellationToken()
+        )
+    }
 }
 
 @MainActor
@@ -49,9 +78,11 @@ final class ClipboardOnlyTranscriptDelivery: TranscriptDeliveryServicing {
 
     func deliver(
         _ transcript: String,
-        to target: DictationTargetContext?
+        to target: DictationTargetContext?,
+        cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult {
         _ = target
+        guard !cancellation.isCancelled else { return .cancelled }
         guard clipboard.copy(transcript) else {
             return .failed(.clipboardUnavailable)
         }

@@ -94,6 +94,7 @@ final class IntegrationTestProbeTests: XCTestCase {
 
         let probe = IntegrationTestProbe(url: url, reset: true)
         let results: [(TranscriptDeliveryResult, String)] = [
+            (.cancelled, "cancelled"),
             (.copiedAfterInsertFailure(.missingTarget), "copiedAfterInsertFailure.missingTarget"),
             (.copiedAfterInsertFailure(.targetTerminated), "copiedAfterInsertFailure.targetTerminated"),
             (.copiedAfterInsertFailure(.frontmostChanged), "copiedAfterInsertFailure.frontmostChanged"),

@@ -21,6 +21,7 @@ final class AssistantController {
     private let playback: any DictationPlaybackControlling
     private var playbackSessionID: UUID?
     private var transcriptionCleanupTask: Task<Void, Never>?
+    private var deliveryCancellation: TranscriptDeliveryCancellationToken?
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
@@ -137,6 +138,8 @@ final class AssistantController {
 
     /// Releases microphone resources synchronously before the process exits.
     func prepareForTermination() {
+        deliveryCancellation?.cancel()
+        deliveryCancellation = nil
         activeSession = nil
         playbackSessionID = nil
         audioLevel = 0
@@ -167,10 +170,24 @@ final class AssistantController {
                 return
             }
 
-            lastCompletedTranscript = finalText
-            let result = await delivery.deliver(finalText, to: session.target)
+            let deliveryCancellation = TranscriptDeliveryCancellationToken()
+            self.deliveryCancellation = deliveryCancellation
+            let result = await delivery.deliver(
+                finalText,
+                to: session.target,
+                cancellation: deliveryCancellation
+            )
+            if self.deliveryCancellation === deliveryCancellation {
+                self.deliveryCancellation = nil
+            }
             guard activeSession?.id == session.id else { return }
+            guard result != .cancelled else {
+                activeSession = nil
+                sessionState = .idle
+                return
+            }
 
+            lastCompletedTranscript = finalText
             activeSession = nil
             sessionState = .completed(
                 transcript: finalText,
@@ -203,6 +220,8 @@ final class AssistantController {
         }
         transcriptionCleanupTask = cleanupTask
 
+        deliveryCancellation?.cancel()
+        deliveryCancellation = nil
         activeSession = nil
         audioLevel = 0
         endPlayback(for: session)
@@ -232,6 +251,8 @@ final class AssistantController {
         case .copiedAfterInsertFailure:
             return .copiedAfterInsertFailure
         case .failed:
+            return .deliveryFailed
+        case .cancelled:
             return .deliveryFailed
         }
     }

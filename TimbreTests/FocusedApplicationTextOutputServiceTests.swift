@@ -353,6 +353,38 @@ final class FocusedApplicationTextOutputServiceTests: XCTestCase {
         XCTAssertEqual(poster.postCount, 1)
     }
 
+    func testCancellationDuringTargetReactivationPreventsClipboardAndPaste() async {
+        let pasteboard = NSPasteboard.withUniqueName()
+        let targets = FakeDictationTargetProvider()
+        targets.isSelfFrontmost = true
+        targets.suspendsActivation = true
+        let poster = FakePasteCommandPoster()
+        let service = makeService(
+            clipboard: ClipboardService(pasteboard: pasteboard),
+            pasteboard: pasteboard,
+            accessibility: FakeAccessibilityPermission(trustState: .trusted),
+            targets: targets,
+            poster: poster
+        )
+        let cancellation = TranscriptDeliveryCancellationToken()
+        let deliveryTask = Task {
+            await service.deliver(
+                "do not insert",
+                to: sampleTarget,
+                cancellation: cancellation
+            )
+        }
+        await waitUntil { targets.activateCallCount == 1 }
+
+        cancellation.cancel()
+        targets.resumeActivation()
+        let result = await deliveryTask.value
+
+        XCTAssertEqual(result, .cancelled)
+        XCTAssertNil(pasteboard.string(forType: .string))
+        XCTAssertEqual(poster.postCount, 0)
+    }
+
     func testSecureFieldCopiesOnly() async {
         let pasteboard = NSPasteboard.withUniqueName()
         let targets = FakeDictationTargetProvider()
