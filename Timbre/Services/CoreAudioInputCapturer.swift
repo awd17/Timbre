@@ -25,7 +25,8 @@ final class CoreAudioInputCapturer {
     private var audioUnit: AudioUnit?
     private var asbd = AudioStreamBasicDescription()
     private var renderBuffer: UnsafeMutablePointer<AudioBufferList>?
-    private var callbackState: CallbackState?
+    /// AU refcon target. Outlives in-flight callbacks; owns optional render state.
+    private var callbackGate: CallbackGate?
     private var isRunning = false
 
     init(inputDevices: CoreAudioInputDeviceManager) {
@@ -99,13 +100,13 @@ final class CoreAudioInputCapturer {
 
     func stop() {
         // Lifetime boundary for the realtime callback:
-        // 1) mark inactive so late entries return immediately
+        // 1) detach render state under the gate lock (new entries no-op)
         // 2) stop IO (HAL stops synchronously w.r.t. the current render)
         // 3) clear the AU callback refcon
-        // 4) wait until any in-flight render finishes
-        // 5) dispose the unit and free callback-owned buffers
-        let state = callbackState
-        state?.beginTeardown()
+        // 4) wait until any in-flight entry finishes
+        // 5) release the gate retain, dispose the unit, free buffers
+        let gate = callbackGate
+        gate?.detach()
 
         if let unit = audioUnit {
             if isRunning {
@@ -126,15 +127,15 @@ final class CoreAudioInputCapturer {
         }
         isRunning = false
 
-        state?.waitUntilIdle()
-        state?.releaseForAudioUnit()
+        gate?.waitUntilIdle()
+        gate?.releaseForAudioUnit()
 
         if let unit = audioUnit {
             AudioUnitUninitialize(unit)
             AudioComponentInstanceDispose(unit)
         }
         audioUnit = nil
-        callbackState = nil
+        callbackGate = nil
         if let renderBuffer {
             freeAudioBufferList(renderBuffer)
             self.renderBuffer = nil
@@ -268,13 +269,14 @@ final class CoreAudioInputCapturer {
             onBuffer: onBuffer,
             onAudioLevel: onAudioLevel
         )
-        callbackState = state
-        // Retain for the AU refcon lifetime; balanced in stop() after idle.
-        state.retainForAudioUnit()
+        let gate = CallbackGate(state: state)
+        callbackGate = gate
+        // Retain gate for the AU refcon lifetime; balanced in stop() after idle.
+        gate.retainForAudioUnit()
 
         var callbackStruct = AURenderCallbackStruct(
             inputProc: Self.renderCallback,
-            inputProcRefCon: Unmanaged.passUnretained(state).toOpaque()
+            inputProcRefCon: Unmanaged.passUnretained(gate).toOpaque()
         )
         try check(
             AudioUnitSetProperty(
@@ -297,6 +299,78 @@ final class CoreAudioInputCapturer {
 
     // MARK: - Realtime callback
 
+    /// AU refcon target. Strongly owns render state and tracks in-flight entries
+    /// under one lock so teardown cannot free resources during callback entry.
+    private final class CallbackGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var state: CallbackState?
+        private var inFlightEntries = 0
+        private var audioUnitRetained = false
+
+        init(state: CallbackState) {
+            self.state = state
+        }
+
+        func retainForAudioUnit() {
+            lock.lock()
+            guard !audioUnitRetained else {
+                lock.unlock()
+                return
+            }
+            audioUnitRetained = true
+            lock.unlock()
+            _ = Unmanaged.passRetained(self)
+        }
+
+        func releaseForAudioUnit() {
+            lock.lock()
+            guard audioUnitRetained else {
+                lock.unlock()
+                return
+            }
+            audioUnitRetained = false
+            lock.unlock()
+            Unmanaged.passUnretained(self).release()
+        }
+
+        /// Drop render state so new entries no-op. Must run before IO stop.
+        func detach() {
+            lock.lock()
+            state = nil
+            lock.unlock()
+        }
+
+        func waitUntilIdle() {
+            while true {
+                lock.lock()
+                let busy = inFlightEntries > 0
+                lock.unlock()
+                if !busy { return }
+                Thread.sleep(forTimeInterval: 0.0005)
+            }
+        }
+
+        /// Load state and register in-flight under one lock — no untracked window.
+        func withState(
+            _ body: (CallbackState) -> OSStatus
+        ) -> OSStatus {
+            lock.lock()
+            guard let state else {
+                lock.unlock()
+                return noErr
+            }
+            inFlightEntries += 1
+            lock.unlock()
+
+            defer {
+                lock.lock()
+                inFlightEntries -= 1
+                lock.unlock()
+            }
+            return body(state)
+        }
+    }
+
     private final class CallbackState: @unchecked Sendable {
         let audioUnit: AudioUnit
         let asbd: AudioStreamBasicDescription
@@ -304,10 +378,6 @@ final class CoreAudioInputCapturer {
         let onBuffer: @Sendable (AVAudioPCMBuffer) -> Void
         let onAudioLevel: @MainActor (Float) -> Void
         let meter = AudioLevelMeter()
-        private let lock = NSLock()
-        private var isActive = true
-        private var inFlightRenders = 0
-        private var audioUnitRetained = false
 
         init(
             audioUnit: AudioUnit,
@@ -323,57 +393,12 @@ final class CoreAudioInputCapturer {
             self.onAudioLevel = onAudioLevel
         }
 
-        /// Extra retain while the AU holds an unretained refcon pointer.
-        func retainForAudioUnit() {
-            lock.lock()
-            guard !audioUnitRetained else {
-                lock.unlock()
-                return
-            }
-            audioUnitRetained = true
-            lock.unlock()
-            _ = Unmanaged.passRetained(self)
-        }
-
-        /// Balances `retainForAudioUnit()` after IO is idle and the callback is cleared.
-        func releaseForAudioUnit() {
-            lock.lock()
-            guard audioUnitRetained else {
-                lock.unlock()
-                return
-            }
-            audioUnitRetained = false
-            lock.unlock()
-            Unmanaged.passUnretained(self).release()
-        }
-
-        /// Prevents new callback entries. Must run before IO stop/dispose.
-        func beginTeardown() {
-            lock.lock()
-            isActive = false
-            lock.unlock()
-        }
-
-        /// Blocks until every render that passed `beginRender()` has finished.
-        func waitUntilIdle() {
-            while true {
-                lock.lock()
-                let busy = inFlightRenders > 0
-                lock.unlock()
-                if !busy { return }
-                Thread.sleep(forTimeInterval: 0.0005)
-            }
-        }
-
         func render(
             ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
             inTimeStamp: UnsafePointer<AudioTimeStamp>,
             inBusNumber: UInt32,
             inNumberFrames: UInt32
         ) -> OSStatus {
-            guard beginRender() else { return noErr }
-            defer { endRender() }
-
             let channels = Int(max(asbd.mChannelsPerFrame, 1))
             let abl = UnsafeMutableAudioBufferListPointer(renderBuffer)
             for index in 0..<min(channels, abl.count) {
@@ -424,20 +449,6 @@ final class CoreAudioInputCapturer {
             }
             return noErr
         }
-
-        private func beginRender() -> Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            guard isActive else { return false }
-            inFlightRenders += 1
-            return true
-        }
-
-        private func endRender() {
-            lock.lock()
-            inFlightRenders -= 1
-            lock.unlock()
-        }
     }
 
     private nonisolated static let renderCallback: AURenderCallback = {
@@ -448,13 +459,18 @@ final class CoreAudioInputCapturer {
         inNumberFrames,
         _
         in
-        let state = Unmanaged<CallbackState>.fromOpaque(inRefCon).takeUnretainedValue()
-        return state.render(
-            ioActionFlags: ioActionFlags,
-            inTimeStamp: inTimeStamp,
-            inBusNumber: inBusNumber,
-            inNumberFrames: inNumberFrames
-        )
+        // Gate is retained for the AU refcon lifetime. withState loads render
+        // state and bumps in-flight under one lock, so stop() cannot free the
+        // render buffer during entry or render.
+        let gate = Unmanaged<CallbackGate>.fromOpaque(inRefCon).takeUnretainedValue()
+        return gate.withState { state in
+            state.render(
+                ioActionFlags: ioActionFlags,
+                inTimeStamp: inTimeStamp,
+                inBusNumber: inBusNumber,
+                inNumberFrames: inNumberFrames
+            )
+        }
     }
 }
 
