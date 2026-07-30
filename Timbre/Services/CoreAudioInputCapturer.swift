@@ -98,15 +98,42 @@ final class CoreAudioInputCapturer {
     }
 
     func stop() {
+        // Lifetime boundary for the realtime callback:
+        // 1) mark inactive so late entries return immediately
+        // 2) stop IO (HAL stops synchronously w.r.t. the current render)
+        // 3) clear the AU callback refcon
+        // 4) wait until any in-flight render finishes
+        // 5) dispose the unit and free callback-owned buffers
+        let state = callbackState
+        state?.beginTeardown()
+
         if let unit = audioUnit {
             if isRunning {
                 AudioOutputUnitStop(unit)
             }
+            var cleared = AURenderCallbackStruct(
+                inputProc: nil,
+                inputProcRefCon: nil
+            )
+            AudioUnitSetProperty(
+                unit,
+                kAudioOutputUnitProperty_SetInputCallback,
+                kAudioUnitScope_Global,
+                0,
+                &cleared,
+                UInt32(MemoryLayout<AURenderCallbackStruct>.size)
+            )
+        }
+        isRunning = false
+
+        state?.waitUntilIdle()
+        state?.releaseForAudioUnit()
+
+        if let unit = audioUnit {
             AudioUnitUninitialize(unit)
             AudioComponentInstanceDispose(unit)
         }
         audioUnit = nil
-        isRunning = false
         callbackState = nil
         if let renderBuffer {
             freeAudioBufferList(renderBuffer)
@@ -242,6 +269,8 @@ final class CoreAudioInputCapturer {
             onAudioLevel: onAudioLevel
         )
         callbackState = state
+        // Retain for the AU refcon lifetime; balanced in stop() after idle.
+        state.retainForAudioUnit()
 
         var callbackStruct = AURenderCallbackStruct(
             inputProc: Self.renderCallback,
@@ -275,6 +304,10 @@ final class CoreAudioInputCapturer {
         let onBuffer: @Sendable (AVAudioPCMBuffer) -> Void
         let onAudioLevel: @MainActor (Float) -> Void
         let meter = AudioLevelMeter()
+        private let lock = NSLock()
+        private var isActive = true
+        private var inFlightRenders = 0
+        private var audioUnitRetained = false
 
         init(
             audioUnit: AudioUnit,
@@ -290,12 +323,57 @@ final class CoreAudioInputCapturer {
             self.onAudioLevel = onAudioLevel
         }
 
+        /// Extra retain while the AU holds an unretained refcon pointer.
+        func retainForAudioUnit() {
+            lock.lock()
+            guard !audioUnitRetained else {
+                lock.unlock()
+                return
+            }
+            audioUnitRetained = true
+            lock.unlock()
+            _ = Unmanaged.passRetained(self)
+        }
+
+        /// Balances `retainForAudioUnit()` after IO is idle and the callback is cleared.
+        func releaseForAudioUnit() {
+            lock.lock()
+            guard audioUnitRetained else {
+                lock.unlock()
+                return
+            }
+            audioUnitRetained = false
+            lock.unlock()
+            Unmanaged.passUnretained(self).release()
+        }
+
+        /// Prevents new callback entries. Must run before IO stop/dispose.
+        func beginTeardown() {
+            lock.lock()
+            isActive = false
+            lock.unlock()
+        }
+
+        /// Blocks until every render that passed `beginRender()` has finished.
+        func waitUntilIdle() {
+            while true {
+                lock.lock()
+                let busy = inFlightRenders > 0
+                lock.unlock()
+                if !busy { return }
+                Thread.sleep(forTimeInterval: 0.0005)
+            }
+        }
+
         func render(
             ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
             inTimeStamp: UnsafePointer<AudioTimeStamp>,
             inBusNumber: UInt32,
             inNumberFrames: UInt32
         ) -> OSStatus {
+            guard beginRender() else { return noErr }
+            defer { endRender() }
+
             let channels = Int(max(asbd.mChannelsPerFrame, 1))
             let abl = UnsafeMutableAudioBufferListPointer(renderBuffer)
             for index in 0..<min(channels, abl.count) {
@@ -345,6 +423,20 @@ final class CoreAudioInputCapturer {
                 }
             }
             return noErr
+        }
+
+        private func beginRender() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard isActive else { return false }
+            inFlightRenders += 1
+            return true
+        }
+
+        private func endRender() {
+            lock.lock()
+            inFlightRenders -= 1
+            lock.unlock()
         }
     }
 
