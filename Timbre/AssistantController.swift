@@ -19,6 +19,7 @@ final class AssistantController {
     private let delivery: TranscriptDeliveryServicing
     private let targetProvider: any DictationTargetProviding
     private let playback: any DictationPlaybackControlling
+    private var playbackSessionID: UUID?
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
@@ -46,13 +47,29 @@ final class AssistantController {
     }
 
     /// Starts the visible session synchronously, then performs preparation asynchronously.
-    /// Shortcut handling uses this entry point so the indicator appears in the same event turn.
+    /// This programmatic entry point intentionally leaves other playback unchanged.
     @discardableResult
     func beginDictation() -> Task<Void, Never>? {
+        beginDictation(adjustsPlayback: false)
+    }
+
+    /// Starts dictation from Timbre's global hotkey.
+    ///
+    /// Playback attenuation is deliberately scoped to this path so unrelated
+    /// microphone activity and non-hotkey diagnostic flows cannot trigger it.
+    @discardableResult
+    func beginDictationFromShortcut() -> Task<Void, Never>? {
+        beginDictation(adjustsPlayback: true)
+    }
+
+    private func beginDictation(
+        adjustsPlayback: Bool
+    ) -> Task<Void, Never>? {
         guard canStart else { return nil }
 
         let session = DictationSessionContext(target: targetProvider.captureTarget())
         activeSession = session
+        playbackSessionID = adjustsPlayback ? session.id : nil
         audioLevel = 0
         sessionState = .preparing
 
@@ -63,6 +80,11 @@ final class AssistantController {
 
     func startDictation() async {
         guard let task = beginDictation() else { return }
+        await task.value
+    }
+
+    func startDictationFromShortcut() async {
+        guard let task = beginDictationFromShortcut() else { return }
         await task.value
     }
 
@@ -84,12 +106,14 @@ final class AssistantController {
                 }
             )
             guard activeSession?.id == session.id else { return }
-            playback.beginListening()
+            if playbackSessionID == session.id {
+                playback.beginListening()
+            }
             // Stop is only available after start succeeds.
             sessionState = .listening(transcript: sessionState.displayedTranscript)
         } catch {
             guard activeSession?.id == session.id else { return }
-            playback.endListening()
+            endPlayback(for: session)
             await transcription.cancel()
             activeSession = nil
             audioLevel = 0
@@ -104,6 +128,7 @@ final class AssistantController {
     /// Releases microphone resources synchronously before the process exits.
     func prepareForTermination() {
         activeSession = nil
+        playbackSessionID = nil
         audioLevel = 0
         playback.shutdownForTermination()
         (transcription as? TerminationHandling)?.shutdownForTermination()
@@ -114,7 +139,7 @@ final class AssistantController {
         guard let session = activeSession else { return }
 
         audioLevel = 0
-        playback.endListening()
+        endPlayback(for: session)
         sessionState = .finishing(transcript: currentTranscript)
 
         do {
@@ -175,6 +200,12 @@ final class AssistantController {
         case .failed:
             return .deliveryFailed
         }
+    }
+
+    private func endPlayback(for session: DictationSessionContext) {
+        guard playbackSessionID == session.id else { return }
+        playbackSessionID = nil
+        playback.endListening()
     }
 
     private static func failureKind(for error: Error) -> SessionFailureKind {

@@ -132,12 +132,31 @@ final class AssistantControllerTests: XCTestCase {
             playback: playback
         )
 
-        await controller.startDictation()
+        await controller.startDictationFromShortcut()
         XCTAssertEqual(playback.beginCount, 1)
         XCTAssertEqual(playback.endCount, 0)
 
         await controller.stopDictation()
         XCTAssertEqual(playback.endCount, 1)
+    }
+
+    func testProgrammaticDictationNeverAdjustsPlayback() async {
+        let playback = FakeDictationPlaybackController()
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(
+                behavior: .success(final: "Hello", partials: [])
+            ),
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await controller.startDictation()
+        await controller.stopDictation()
+
+        XCTAssertEqual(playback.beginCount, 0)
+        XCTAssertEqual(playback.endCount, 0)
     }
 
     func testTerminationSynchronouslyShutsDownPlayback() {

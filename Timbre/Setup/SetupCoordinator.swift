@@ -180,6 +180,7 @@ final class SetupCoordinator {
     private let featureEnabled: Bool
     private var inFlightEffect: SetupEffect?
     private var effectTask: Task<Void, Never>?
+    private var permissionMonitorTask: Task<Void, Never>?
     private var previousAllowsDictation: Bool?
 
     var onReadinessChanged: ((Bool) -> Void)?
@@ -294,7 +295,10 @@ final class SetupCoordinator {
         if visible {
             TimbreLog.line("Timbre onboarding: window shown step=\(step)")
             windowDidBecomeActive()
+            startPermissionMonitor()
         } else {
+            permissionMonitorTask?.cancel()
+            permissionMonitorTask = nil
             TimbreLog.line("Timbre onboarding: window closed step=\(step)")
         }
     }
@@ -399,6 +403,33 @@ final class SetupCoordinator {
         shortcutOnboarding.refreshFromStorage()
         reconcile(intent: .refresh)
         TimbreLog.line("Timbre onboarding: initial step=\(step)")
+    }
+
+    /// Accessibility does not publish a public permission-change notification.
+    /// While setup is visible, observe the one authoritative value and
+    /// reconcile only when it changes. This covers grants made in System
+    /// Settings even when an accessory/menu-bar app receives no activation
+    /// transition on the way back.
+    private func startPermissionMonitor() {
+        permissionMonitorTask?.cancel()
+        let startingState = accessibility.trustState
+        permissionMonitorTask = Task { [weak self] in
+            var observedState = startingState
+
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: 300_000_000)
+                } catch {
+                    return
+                }
+                guard let self, self.isWindowVisible else { return }
+
+                let currentState = self.accessibility.trustState
+                guard currentState != observedState else { continue }
+                observedState = currentState
+                self.reconcile(intent: .refresh)
+            }
+        }
     }
 
     private func reconcile(intent: SetupIntent) {

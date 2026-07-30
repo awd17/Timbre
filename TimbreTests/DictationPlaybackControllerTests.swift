@@ -7,34 +7,24 @@ import XCTest
 private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
     var defaultUID: String?
     var devices: [String: AudioOutputDevice] = [:]
-    var volumes: [String: Float] = [:]
     var mutes: [String: Bool] = [:]
-    var volumeSettable: Set<String> = []
     var muteSettable: Set<String> = []
-    var volumeWrites: [(String, Float)] = []
     var muteWrites: [(String, Bool)] = []
-    var volumeQuantum: Float?
-    var volumeWriteStatuses: [OSStatus] = []
     var muteWriteStatuses: [OSStatus] = []
     private(set) var stopMonitoringCount = 0
 
     private var onDevicesChanged: (@MainActor () -> Void)?
     private var onDefaultOutputChanged: (@MainActor () -> Void)?
+    private var onPlaybackStateChanged: (@MainActor () -> Void)?
 
     func addDevice(
         uid: String,
         id: AudioDeviceID,
-        volume: Float? = nil,
         mute: Bool? = nil,
-        canSetVolume: Bool = true,
         canSetMute: Bool = true
     ) {
         devices[uid] = AudioOutputDevice(audioDeviceID: id, uid: uid)
-        volumes[uid] = volume
         mutes[uid] = mute
-        if canSetVolume, volume != nil {
-            volumeSettable.insert(uid)
-        }
         if canSetMute, mute != nil {
             muteSettable.insert(uid)
         }
@@ -46,29 +36,6 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
 
     func outputDevice(forUID uid: String) -> AudioOutputDevice? {
         devices[uid]
-    }
-
-    func volume(of device: AudioOutputDevice) -> Float? {
-        volumes[device.uid]
-    }
-
-    func canSetVolume(of device: AudioOutputDevice) -> Bool {
-        volumeSettable.contains(device.uid)
-    }
-
-    func setVolume(_ value: Float, of device: AudioOutputDevice) -> OSStatus {
-        guard canSetVolume(of: device) else { return kAudioHardwareUnsupportedOperationError }
-        let status = volumeWriteStatuses.isEmpty
-            ? noErr
-            : volumeWriteStatuses.removeFirst()
-        guard status == noErr else { return status }
-        if let volumeQuantum {
-            volumes[device.uid] = (value / volumeQuantum).rounded() * volumeQuantum
-        } else {
-            volumes[device.uid] = value
-        }
-        volumeWrites.append((device.uid, value))
-        return noErr
     }
 
     func mute(of device: AudioOutputDevice) -> Bool? {
@@ -102,6 +69,19 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
         stopMonitoringCount += 1
         onDevicesChanged = nil
         onDefaultOutputChanged = nil
+        onPlaybackStateChanged = nil
+    }
+
+    func startMonitoringPlaybackState(
+        of device: AudioOutputDevice,
+        onChanged: @escaping @MainActor () -> Void
+    ) {
+        _ = device
+        onPlaybackStateChanged = onChanged
+    }
+
+    func stopMonitoringPlaybackState() {
+        onPlaybackStateChanged = nil
     }
 
     func changeDefaultOutput(to uid: String?) {
@@ -111,6 +91,10 @@ private final class FakeAudioOutputHardware: AudioOutputHardwareProviding {
 
     func announceDeviceChange() {
         onDevicesChanged?()
+    }
+
+    func announcePlaybackStateChange() {
+        onPlaybackStateChanged?()
     }
 }
 
@@ -131,160 +115,185 @@ final class DictationPlaybackControllerTests: XCTestCase {
 
     func testKeepUnchangedDoesNotTouchOutput() {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .keepUnchanged)
-        let hardware = makeHardware(volume: 0.8)
+        let hardware = makeHardware()
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
         controller.endListening()
 
-        XCTAssertTrue(hardware.volumeWrites.isEmpty)
         XCTAssertTrue(hardware.muteWrites.isEmpty)
-        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
-    }
-
-    func testLowerUsesQuarterOfStartingVolumeAndRestoresIt() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
-        let controller = makeController(preferences, hardware)
-
-        controller.beginListening()
-        assertVolume(hardware, uid: "one", equals: 0.2)
-        XCTAssertNotNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
-
-        controller.endListening()
-        assertVolume(hardware, uid: "one", equals: 0.8)
-        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
-    }
-
-    func testLowerRecordsHardwareReadbackAndRestoresQuantizedVolume() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8125)
-        hardware.volumeQuantum = 0.0625
-        let controller = makeController(preferences, hardware)
-
-        controller.beginListening()
-        // 0.8125 × 0.25 requests 0.203125; this device applies 0.1875.
-        assertVolume(hardware, uid: "one", equals: 0.1875)
-
-        controller.endListening()
-        assertVolume(hardware, uid: "one", equals: 0.8125)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
     func testMuteUsesMuteControlAndRestoresIt() {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
-        let hardware = makeHardware(volume: 0.8, mute: false)
+        let hardware = makeHardware()
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
         XCTAssertEqual(hardware.mutes["one"], true)
-        XCTAssertTrue(hardware.volumeWrites.isEmpty)
+        XCTAssertNotNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
 
         controller.endListening()
         XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
-    func testMuteFallsBackToZeroVolume() {
+    func testAlreadyMutedOutputIsLeftUnchanged() {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
-        let hardware = makeHardware(volume: 0.8, mute: nil)
+        let hardware = makeHardware(mute: true)
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
-        assertVolume(hardware, uid: "one", equals: 0)
-
         controller.endListening()
-        assertVolume(hardware, uid: "one", equals: 0.8)
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
-    func testMuteFallsBackToVolumeWhenAdvertisedMuteControlRejectsWrite() {
+    func testRejectedMuteWriteLeavesOutputUnchanged() {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
-        let hardware = makeHardware(volume: 0.8, mute: false)
+        let hardware = makeHardware()
         hardware.muteWriteStatuses = [kAudioHardwareUnspecifiedError]
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
+
         XCTAssertEqual(hardware.mutes["one"], false)
-        assertVolume(hardware, uid: "one", equals: 0)
-
-        controller.endListening()
-        assertVolume(hardware, uid: "one", equals: 0.8)
-    }
-
-    func testManualVolumeChangeIsNotOverwrittenDuringRestore() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
-        let controller = makeController(preferences, hardware)
-
-        controller.beginListening()
-        hardware.volumes["one"] = 0.55
-        controller.endListening()
-
-        assertVolume(hardware, uid: "one", equals: 0.55)
+        XCTAssertFalse(controller.isCurrentOutputControllable)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
-    func testDefaultOutputChangeRestoresOldAndAttenuatesNewOutput() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
-        hardware.addDevice(uid: "two", id: 2, volume: 0.6, mute: false)
+    func testDefaultOutputChangeRestoresOldAndMutesNewOutput() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        hardware.addDevice(uid: "two", id: 2, mute: false)
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
         hardware.changeDefaultOutput(to: "two")
 
-        assertVolume(hardware, uid: "one", equals: 0.8)
-        assertVolume(hardware, uid: "two", equals: 0.15)
-
+        XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertEqual(hardware.mutes["two"], true)
         controller.endListening()
-        assertVolume(hardware, uid: "two", equals: 0.6)
+        XCTAssertEqual(hardware.mutes["two"], false)
     }
 
-    func testNewControllerRecoversPersistedAppliedVolume() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
+    func testDuplicateDefaultOutputNotificationDoesNotRestoreAndReapply() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        XCTAssertEqual(hardware.muteWrites.count, 1)
+
+        hardware.changeDefaultOutput(to: "one")
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 1)
+    }
+
+    func testIdleHardwareNotificationsNeverWritePlaybackState() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        let controller = makeController(preferences, hardware)
+
+        hardware.changeDefaultOutput(to: "one")
+        hardware.announceDeviceChange()
+
+        XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
+        withExtendedLifetime(controller) {}
+    }
+
+    func testMuteReappliesWhenDeviceRevertsWhileRouteSettles() async {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        hardware.mutes["one"] = false
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 2)
+    }
+
+    func testMuteImmediatelyReappliesActiveOutputStateChange() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        hardware.mutes["one"] = false
+        hardware.announcePlaybackStateChange()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 2)
+    }
+
+    func testIdlePlaybackStateChangeCannotWriteOutput() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        controller.endListening()
+        hardware.mutes["one"] = true
+        hardware.announcePlaybackStateChange()
+
+        XCTAssertEqual(hardware.mutes["one"], true)
+        XCTAssertEqual(hardware.muteWrites.count, 2)
+    }
+
+    func testNewControllerRecoversPersistedMute() {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
         var firstController: DictationPlaybackController? = makeController(
             preferences,
             hardware
         )
         firstController?.beginListening()
-        assertVolume(hardware, uid: "one", equals: 0.2)
+        XCTAssertEqual(hardware.mutes["one"], true)
 
         firstController = nil
         let recovered = makeController(preferences, hardware)
 
-        assertVolume(hardware, uid: "one", equals: 0.8)
+        XCTAssertEqual(hardware.mutes["one"], false)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
         withExtendedLifetime(recovered) {}
     }
 
     func testUnsupportedOutputLeavesPlaybackUnchanged() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8, canSetVolume: false)
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware(mute: nil, canSetMute: false)
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
 
         XCTAssertFalse(controller.isCurrentOutputControllable)
-        assertVolume(hardware, uid: "one", equals: 0.8)
-        XCTAssertTrue(hardware.volumeWrites.isEmpty)
+        XCTAssertTrue(hardware.muteWrites.isEmpty)
     }
 
     func testTerminationRestoresSynchronouslyAndStopsMonitoring() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
         let controller = makeController(preferences, hardware)
 
         controller.beginListening()
         controller.shutdownForTermination()
 
-        assertVolume(hardware, uid: "one", equals: 0.8)
+        XCTAssertEqual(hardware.mutes["one"], false)
         XCTAssertEqual(hardware.stopMonitoringCount, 1)
     }
 
     func testFailedRestoreStaysPendingAndRecoversOnNextLaunch() {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
-        hardware.volumeWriteStatuses = [noErr, kAudioHardwareUnspecifiedError]
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        hardware.muteWriteStatuses = [noErr, kAudioHardwareUnspecifiedError]
         var controller: DictationPlaybackController? = makeController(
             preferences,
             hardware
@@ -293,20 +302,40 @@ final class DictationPlaybackControllerTests: XCTestCase {
         controller?.beginListening()
         controller?.endListening()
 
-        assertVolume(hardware, uid: "one", equals: 0.2)
+        XCTAssertEqual(hardware.mutes["one"], true)
         XCTAssertNotNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
 
         controller = nil
         let recovered = makeController(preferences, hardware)
 
-        assertVolume(hardware, uid: "one", equals: 0.8)
+        XCTAssertEqual(hardware.mutes["one"], false)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
         withExtendedLifetime(recovered) {}
     }
 
-    func testAssistantLifecycleAppliesAndRestoresRealPlaybackTransaction() async {
-        let preferences = InMemoryAppPreferences(playbackDuringDictation: .lower)
-        let hardware = makeHardware(volume: 0.8)
+    func testFailedUnmuteIsRetriedAfterListeningEnds() async {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
+        hardware.muteWriteStatuses = [
+            noErr,
+            kAudioHardwareUnspecifiedError,
+            noErr,
+        ]
+        let controller = makeController(preferences, hardware)
+
+        controller.beginListening()
+        controller.endListening()
+        XCTAssertEqual(hardware.mutes["one"], true)
+
+        try? await Task.sleep(nanoseconds: 180_000_000)
+
+        XCTAssertEqual(hardware.mutes["one"], false)
+        XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
+    }
+
+    func testAssistantLifecycleAppliesAndRestoresMuteTransaction() async {
+        let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
+        let hardware = makeHardware()
         let playback = makeController(preferences, hardware)
         let assistant = AssistantController(
             transcription: MockTranscriptionService(
@@ -318,18 +347,18 @@ final class DictationPlaybackControllerTests: XCTestCase {
             playback: playback
         )
 
-        XCTAssertEqual(hardware.volumes["one"], 0.8)
-        await assistant.startDictation()
-        assertVolume(hardware, uid: "one", equals: 0.2)
+        XCTAssertEqual(hardware.mutes["one"], false)
+        await assistant.startDictationFromShortcut()
+        XCTAssertEqual(hardware.mutes["one"], true)
 
         await assistant.stopDictation()
-        assertVolume(hardware, uid: "one", equals: 0.8)
+        XCTAssertEqual(hardware.mutes["one"], false)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
     func testCaptureStartFailureNeverChangesPlayback() async {
         let preferences = InMemoryAppPreferences(playbackDuringDictation: .mute)
-        let hardware = makeHardware(volume: 0.8, mute: false)
+        let hardware = makeHardware()
         let playback = makeController(preferences, hardware)
         let assistant = AssistantController(
             transcription: MockTranscriptionService(
@@ -341,26 +370,23 @@ final class DictationPlaybackControllerTests: XCTestCase {
             playback: playback
         )
 
-        await assistant.startDictation()
+        await assistant.startDictationFromShortcut()
 
         XCTAssertEqual(hardware.mutes["one"], false)
-        XCTAssertTrue(hardware.volumeWrites.isEmpty)
         XCTAssertTrue(hardware.muteWrites.isEmpty)
         XCTAssertNil(defaults.data(forKey: DictationPlaybackController.restorationRecordsKey))
     }
 
     private func makeHardware(
-        volume: Float,
         mute: Bool? = false,
-        canSetVolume: Bool = true
+        canSetMute: Bool = true
     ) -> FakeAudioOutputHardware {
         let hardware = FakeAudioOutputHardware()
         hardware.addDevice(
             uid: "one",
             id: 1,
-            volume: volume,
             mute: mute,
-            canSetVolume: canSetVolume
+            canSetMute: canSetMute
         )
         hardware.defaultUID = "one"
         return hardware
@@ -377,19 +403,6 @@ final class DictationPlaybackControllerTests: XCTestCase {
         )
     }
 
-    private func assertVolume(
-        _ hardware: FakeAudioOutputHardware,
-        uid: String,
-        equals expected: Float,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        guard let value = hardware.volumes[uid] else {
-            XCTFail("Missing volume for \(uid)", file: file, line: line)
-            return
-        }
-        XCTAssertEqual(value, expected, accuracy: 0.0001, file: file, line: line)
-    }
 }
 
 @MainActor

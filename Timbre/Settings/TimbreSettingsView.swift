@@ -178,13 +178,11 @@ struct TimbreSettingsView: View {
         if preferences.playbackDuringDictation != .keepUnchanged,
            !playbackController.isCurrentOutputControllable
         {
-            return "The current output controls volume externally, so Timbre cannot change it."
+            return "The current output does not expose a software mute control."
         }
         switch preferences.playbackDuringDictation {
         case .keepUnchanged:
             return "Leave other audio at its current volume."
-        case .lower:
-            return "Temporarily reduce the current output to 25% while listening."
         case .mute:
             return "Temporarily mute the current output while listening."
         }

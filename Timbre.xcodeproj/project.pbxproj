@@ -367,7 +367,7 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Timbre.app/Contents/MacOS/Timbre";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Timbre Debug.app/Contents/MacOS/Timbre Debug";
 			};
 			name = Debug;
 		};
@@ -584,6 +584,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Timbre/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Timbre Debug";
+				INFOPLIST_KEY_CFBundleName = "Timbre Debug";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Timbre uses your microphone to transcribe your speech into text.";
@@ -594,8 +596,9 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 14.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.Timbre;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.augustdrakton.Timbre.debug;
+				PRODUCT_MODULE_NAME = Timbre;
+				PRODUCT_NAME = "Timbre Debug";
 				REGISTER_APP_GROUPS = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;

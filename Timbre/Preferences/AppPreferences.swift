@@ -18,7 +18,6 @@ enum MicrophoneSelection: Codable, Equatable, Hashable {
 
 enum PlaybackDuringDictation: String, CaseIterable, Codable, Identifiable {
     case keepUnchanged
-    case lower
     case mute
 
     var id: Self { self }
@@ -27,8 +26,6 @@ enum PlaybackDuringDictation: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .keepUnchanged:
             return "Keep Unchanged"
-        case .lower:
-            return "Lower"
         case .mute:
             return "Mute"
         }
@@ -130,11 +127,17 @@ final class UserDefaultsAppPreferences: ObservableObject, AppPreferencesProvidin
         microphoneSelection = defaults.data(forKey: Self.microphoneSelectionKey)
             .flatMap { try? JSONDecoder().decode(MicrophoneSelection.self, from: $0) }
             ?? .systemDefault
-        playbackDuringDictation = defaults.string(
+        if let storedPlayback = defaults.string(
             forKey: Self.playbackDuringDictationKey
-        )
-        .flatMap(PlaybackDuringDictation.init(rawValue:))
-            ?? .keepUnchanged
+        ),
+            let playback = PlaybackDuringDictation(rawValue: storedPlayback)
+        {
+            playbackDuringDictation = playback
+        } else {
+            playbackDuringDictation = .keepUnchanged
+            // Remove values for playback modes that no longer exist.
+            defaults.removeObject(forKey: Self.playbackDuringDictationKey)
+        }
     }
 
     func resetUserSettings() {
