@@ -29,7 +29,7 @@ your audio locally and inserts the result at your cursor.
 
 1. [Download Timbre](https://github.com/awd17/Timbre/releases/latest/download/Timbre.dmg).
 2. Open the disk image and drag **Timbre** to the **Applications** shortcut.
-3. Open Timbre. It will appear as a waveform in your menu bar.
+3. Open Timbre. Its seven-bar icon will appear in your menu bar.
 4. Follow the setup guide to choose a shortcut, grant Microphone and
    Accessibility permissions, and download the speech model.
 
@@ -50,7 +50,10 @@ permission later in **System Settings → Privacy & Security**.
 3. Speak normally.
 4. Press the shortcut again to stop and insert the transcription.
 
-Click the waveform in the menu bar for Settings, setup recovery, your last
+Press `Escape` at any point to cancel the current dictation immediately. Timbre
+discards any speech already detected and inserts nothing.
+
+Click the Timbre icon in the menu bar for Settings, setup recovery, your last
 dictation, or Quit. If text cannot be inserted safely, Timbre preserves the
 transcript so you can copy it yourself.
 

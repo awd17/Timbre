@@ -40,6 +40,7 @@ final class AssistantController {
     var statusMessage: String { sessionState.statusMessage }
     var canStart: Bool { sessionState.canStart }
     var canStop: Bool { sessionState.canStop }
+    var canCancel: Bool { activeSession != nil }
     var canCopyLastTranscript: Bool { lastCompletedTranscript != nil }
 
     func setSessionStateHandler(_ handler: ((SessionState) -> Void)?) {
@@ -175,6 +176,25 @@ final class AssistantController {
                 message: error.localizedDescription,
                 transcript: sessionState.displayedTranscript
             )
+        }
+    }
+
+    /// Immediately abandons the active recording without transcription or delivery.
+    ///
+    /// Session identity is invalidated before asynchronous microphone cleanup
+    /// begins, so late partials, final text, and stop results cannot be inserted.
+    @discardableResult
+    func cancelDictation() -> Task<Void, Never>? {
+        guard let session = activeSession else { return nil }
+
+        activeSession = nil
+        audioLevel = 0
+        endPlayback(for: session)
+        sessionState = .idle
+        TimbreLog.line("Timbre dictation: cancelled.")
+
+        return Task { [transcription] in
+            await transcription.cancel()
         }
     }
 

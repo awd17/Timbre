@@ -125,6 +125,8 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
     private var dismissalTask: Task<Void, Never>?
     private var phaseTransitionTask: Task<Void, Never>?
     private var screenObserver: NSObjectProtocol?
+    private var localEscapeMonitor: Any?
+    private var globalEscapeMonitor: Any?
     private var isSessionVisible = false
     private var isApplyingFrame = false
     private var isObserving = false
@@ -145,6 +147,7 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         controller.setSessionStateHandler { [weak self] state in
             self?.reconcile(state)
         }
+        startEscapeMonitoring()
         reconcile(controller.sessionState)
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -164,11 +167,46 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         dismissalTask = nil
         phaseTransitionTask?.cancel()
         phaseTransitionTask = nil
+        stopEscapeMonitoring()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
         screenObserver = nil
         panel?.orderOut(nil)
+    }
+
+    private func startEscapeMonitoring() {
+        localEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self] event in
+            guard Self.isEscapeKeyDown(event) else { return event }
+            let didCancel = MainActor.assumeIsolated {
+                self?.controller.cancelDictation() != nil
+            }
+            return didCancel ? nil : event
+        }
+
+        globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
+            [weak self] event in
+            guard Self.isEscapeKeyDown(event) else { return }
+            Task { @MainActor [weak self] in
+                self?.controller.cancelDictation()
+            }
+        }
+    }
+
+    private func stopEscapeMonitoring() {
+        if let localEscapeMonitor {
+            NSEvent.removeMonitor(localEscapeMonitor)
+        }
+        localEscapeMonitor = nil
+        if let globalEscapeMonitor {
+            NSEvent.removeMonitor(globalEscapeMonitor)
+        }
+        globalEscapeMonitor = nil
+    }
+
+    private static func isEscapeKeyDown(_ event: NSEvent) -> Bool {
+        event.keyCode == 53 && !event.isARepeat
     }
 
     func resetPlacement() {

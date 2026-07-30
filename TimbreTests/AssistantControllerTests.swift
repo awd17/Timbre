@@ -119,6 +119,73 @@ private final class RetainedLevelTranscriptionService: TranscriptionServicing {
 }
 
 @MainActor
+private final class SuspendingTranscriptionService: TranscriptionServicing {
+    enum Suspension {
+        case none
+        case prepare
+        case stop
+    }
+
+    private let suspension: Suspension
+    private var prepareContinuation: CheckedContinuation<Void, Never>?
+    private var stopContinuation: CheckedContinuation<String, Error>?
+    private var partialHandler: (@MainActor (String) -> Void)?
+    private var audioLevelHandler: (@MainActor (Float) -> Void)?
+    private(set) var prepareCallCount = 0
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    private(set) var cancelCallCount = 0
+
+    init(suspension: Suspension) {
+        self.suspension = suspension
+    }
+
+    func prepare() async throws {
+        prepareCallCount += 1
+        guard suspension == .prepare else { return }
+        await withCheckedContinuation { continuation in
+            prepareContinuation = continuation
+        }
+    }
+
+    func start(
+        onPartialResult: @escaping @MainActor (String) -> Void,
+        onAudioLevel: @escaping @MainActor (Float) -> Void
+    ) async throws {
+        startCallCount += 1
+        partialHandler = onPartialResult
+        audioLevelHandler = onAudioLevel
+    }
+
+    func stop() async throws -> String {
+        stopCallCount += 1
+        guard suspension == .stop else { return "Already detected" }
+        return try await withCheckedThrowingContinuation { continuation in
+            stopContinuation = continuation
+        }
+    }
+
+    func cancel() async {
+        cancelCallCount += 1
+    }
+
+    func resumePreparation() {
+        prepareContinuation?.resume()
+        prepareContinuation = nil
+    }
+
+    func resumeStop(with transcript: String) {
+        stopContinuation?.resume(returning: transcript)
+        stopContinuation = nil
+    }
+
+    func emitDetectedSpeech() {
+        partialHandler?("Already detected")
+        audioLevelHandler?(0.7)
+    }
+}
+
+@MainActor
 final class AssistantControllerTests: XCTestCase {
     func testPlaybackAttenuationMatchesListeningLifecycle() async {
         let playback = FakeDictationPlaybackController()
@@ -157,6 +224,98 @@ final class AssistantControllerTests: XCTestCase {
 
         XCTAssertEqual(playback.beginCount, 0)
         XCTAssertEqual(playback.endCount, 0)
+    }
+
+    func testCancelDuringPreparingHidesImmediatelyAndPreventsCaptureStart() async {
+        let transcription = SuspendingTranscriptionService(suspension: .prepare)
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        let startTask = controller.beginDictationFromShortcut()
+        await waitUntil { transcription.prepareCallCount == 1 }
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+        XCTAssertFalse(controller.canCancel)
+
+        transcription.resumePreparation()
+        await startTask?.value
+        await cancelTask?.value
+
+        XCTAssertEqual(transcription.startCallCount, 0)
+        XCTAssertEqual(transcription.cancelCallCount, 1)
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+    }
+
+    func testCancelAfterPartialSpeechDiscardsTranscriptAndRestoresPlayback() async {
+        let transcription = SuspendingTranscriptionService(suspension: .none)
+        let playback = FakeDictationPlaybackController()
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider(),
+            playback: playback
+        )
+
+        await controller.startDictationFromShortcut()
+        transcription.emitDetectedSpeech()
+        XCTAssertEqual(
+            controller.sessionState,
+            .listening(transcript: "Already detected")
+        )
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertEqual(controller.audioLevel, 0)
+        XCTAssertNil(controller.activeSession)
+        XCTAssertEqual(playback.endCount, 1)
+
+        await cancelTask?.value
+        XCTAssertEqual(transcription.cancelCallCount, 1)
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
+    }
+
+    func testCancelWhileFinishingDiscardsLateFinalTranscript() async {
+        let transcription = SuspendingTranscriptionService(suspension: .stop)
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+
+        await controller.startDictation()
+        transcription.emitDetectedSpeech()
+        let stopTask = Task { await controller.stopDictation() }
+        await waitUntil { transcription.stopCallCount == 1 }
+        XCTAssertEqual(
+            controller.sessionState,
+            .finishing(transcript: "Already detected")
+        )
+
+        let cancelTask = controller.cancelDictation()
+
+        XCTAssertEqual(controller.sessionState, .idle)
+        XCTAssertNil(controller.activeSession)
+
+        transcription.resumeStop(with: "Late final transcript")
+        await stopTask.value
+        await cancelTask?.value
+
+        XCTAssertTrue(delivery.deliveredTranscripts.isEmpty)
+        XCTAssertNil(controller.lastCompletedTranscript)
     }
 
     func testTerminationSynchronouslyShutsDownPlayback() {
