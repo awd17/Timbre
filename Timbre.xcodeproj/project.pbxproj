@@ -33,6 +33,7 @@
 		97516C50300C400100000001 /* TimbreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimbreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		97516C60300C400100000011 /* TimbreUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TimbreUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		97516C71300C500100000002 /* ParakeetSmokeTest */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ParakeetSmokeTest; sourceTree = BUILT_PRODUCTS_DIR; };
+		97A0AUTH300C400100000001 /* Auth.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Auth.xcconfig; sourceTree = "<group>"; };
 		97EC226D300C275500E4A542 /* Timbre Debug.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Timbre Debug.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -112,9 +113,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		97A0AUTH300C400100000002 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				97A0AUTH300C400100000001 /* Auth.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
 		97EC2264300C275500E4A542 = {
 			isa = PBXGroup;
 			children = (
+				97A0AUTH300C400100000002 /* Config */,
 				97EC226F300C275500E4A542 /* Timbre */,
 				97516C8A300C600100000001 /* Shared */,
 				97516C52300C400100000003 /* TimbreTests */,
@@ -573,6 +583,7 @@
 		};
 		97EC227A300C275800E4A542 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 97A0AUTH300C400100000001 /* Auth.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -607,6 +618,7 @@
 		};
 		97EC227B300C275800E4A542 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 97A0AUTH300C400100000001 /* Auth.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;

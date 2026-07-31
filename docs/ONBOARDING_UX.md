@@ -5,13 +5,18 @@ Developer notes for Timbre’s first-run onboarding window.
 ## Visible flow
 
 ```text
-Welcome
+Sign In
+→ Welcome
 → Choose shortcut
 → Microphone if needed
 → Text Insertion if needed
 → Getting ready (download / verify)
 → Ready
 ```
+
+Sign-in is required before Welcome while first-run setup is incomplete. Users
+who already finished onboarding manage account auth from **Settings → Account**
+or the menu bar (Sign In… / Sign Out), not by re-entering setup.
 
 There is no multi-stage progress indicator. Steps transition in one branded window.
 

@@ -5,6 +5,7 @@ struct MenuBarMenuView: View {
     @ObservedObject var preferences: UserDefaultsAppPreferences
     @ObservedObject var inputDevices: CoreAudioInputDeviceManager
     var setupCoordinator: SetupCoordinator?
+    @Bindable var authentication: AuthenticationController
     var onOpenSetup: (() -> Void)?
     var onOpenSettings: (() -> Void)?
 
@@ -17,6 +18,8 @@ struct MenuBarMenuView: View {
 
             Divider()
         }
+
+        accountMenuSection
 
         Menu("Microphone") {
             microphoneButton(
@@ -47,10 +50,12 @@ struct MenuBarMenuView: View {
 
         Divider()
 
-        Button("Settings…") {
-            onOpenSettings?()
+        if setupCoordinator?.settingsAreUnlocked != false {
+            Button("Settings…") {
+                onOpenSettings?()
+            }
+            .accessibilityIdentifier("settingsMenuItem")
         }
-        .accessibilityIdentifier("settingsMenuItem")
 
         Button("Copy Last Dictation") {
             controller.copyLastTranscript()
@@ -64,6 +69,35 @@ struct MenuBarMenuView: View {
             controller.quit()
         }
         .accessibilityIdentifier("quitMenuItem")
+    }
+
+    @ViewBuilder
+    private var accountMenuSection: some View {
+        switch authentication.state {
+        case .signedOut:
+            Button("Sign In…") {
+                authentication.signIn()
+            }
+            .accessibilityIdentifier("signInMenuItem")
+        case .signingIn:
+            Button("Signing In…") {}
+                .disabled(true)
+                .accessibilityIdentifier("signingInMenuItem")
+        case .signedIn(let user):
+            Text(user.email ?? user.displayName)
+                .accessibilityIdentifier("signedInAccountMenuLabel")
+            Button("Sign Out") {
+                authentication.signOut()
+            }
+            .accessibilityIdentifier("signOutMenuItem")
+        case .error:
+            Button("Sign In…") {
+                authentication.retry()
+            }
+            .accessibilityIdentifier("signInRetryMenuItem")
+        }
+
+        Divider()
     }
 
     @ViewBuilder

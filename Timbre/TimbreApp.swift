@@ -1,4 +1,5 @@
 import AppKit
+import AuthenticationServices
 import KeyboardShortcuts
 import SwiftUI
 
@@ -28,6 +29,7 @@ struct TimbreApp: App {
                 inputDevices: appDelegate.audioInputDevices,
                 playbackController: appDelegate.playbackController,
                 controller: appDelegate.controller,
+                authentication: appDelegate.authenticationController,
                 shortcutState: appDelegate.shortcutState,
                 shortcutName: appDelegate.shortcutRecorderName,
                 bundleInformation: BundleInformation(),
@@ -51,6 +53,7 @@ struct TimbreApp: App {
                     appDelegate.settingsOpeningCoordinator.open()
                 }
                 .keyboardShortcut(",")
+                .disabled(appDelegate.setupCoordinator?.settingsAreUnlocked == false)
             }
         }
     }
@@ -61,6 +64,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let controller: AssistantController
     let modelManager: any ParakeetModelManaging
     let setupCoordinator: SetupCoordinator?
+    let authenticationController: AuthenticationController
     let prewarmCoordinator: ParakeetPrewarmCoordinator?
     let shortcutCoordinator: DictationShortcutCoordinator
     let appPreferences: UserDefaultsAppPreferences
@@ -88,6 +92,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             preferences: appPreferences,
             inputDevices: audioInputDevices,
             setupCoordinator: setupCoordinator,
+            authentication: authenticationController,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
             },
@@ -112,6 +117,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         let selectedShortcutState: KeyboardShortcutsOnboardingAdapter
         let shouldConfigurePrewarm: Bool
         let isProductionBackendForPrewarm: Bool
+
+        let authenticationController = AuthenticationController()
+        self.authenticationController = authenticationController
 
         #if DEBUG
         let integrationConfiguration = IntegrationTestConfiguration.resolve(
@@ -141,6 +149,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 "Timbre integration: profile=\(integrationRuntime.configuration.profile) scenario=\(integrationRuntime.configuration.scenario.rawValue)"
             )
             selectedModelManager = integrationRuntime.modelManager
+            // Integration UI covers onboarding without a live Clerk session.
             selectedSetupCoordinator = SetupCoordinator(
                 modelManager: integrationRuntime.modelManager,
                 microphone: integrationRuntime.microphone,
@@ -149,6 +158,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     defaults: integrationRuntime.defaults
                 ),
                 shortcutOnboarding: integrationRuntime.shortcutOnboarding,
+                authentication: AlwaysAuthenticatedStatus(),
                 featureEnabled: true
             )
             selectedTranscription = integrationRuntime.transcription
@@ -162,6 +172,17 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             selectedShortcutState = integrationRuntime.shortcutOnboarding
             shouldConfigurePrewarm = true
             isProductionBackendForPrewarm = true
+            // The integration UI drives onboarding without a live Clerk session.
+            // Plant a signed-in account so the combined welcome + sign-in page
+            // renders its signed-in branch (advance via Continue).
+            authenticationController._testApplySignedInState(
+                user: MeUser(
+                    userId: "integration",
+                    email: "integration@timbre.test",
+                    firstName: "Timbre",
+                    lastName: "Integration"
+                )
+            )
         } else {
             let productionModelManager = ParakeetModelManager()
             let liveAccessibility = AccessibilityPermissionService()
@@ -175,6 +196,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     accessibility: liveAccessibility,
                     preferences: UserDefaultsOnboardingPreferences(),
                     shortcutOnboarding: shortcutState,
+                    authentication: authenticationController,
                     featureEnabled: true
                 )
                 : nil
@@ -209,6 +231,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             accessibility: liveAccessibility,
             preferences: UserDefaultsOnboardingPreferences(),
             shortcutOnboarding: shortcutState,
+            authentication: authenticationController,
             featureEnabled: true
         )
         selectedTranscription = Self.makeTranscriptionService(
@@ -245,7 +268,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         self.dockVisibilityCoordinator = dockVisibilityCoordinator
         settingsOpeningCoordinator = SettingsOpeningCoordinator(
-            dockVisibilityCoordinator: dockVisibilityCoordinator
+            dockVisibilityCoordinator: dockVisibilityCoordinator,
+            setupCoordinator: selectedSetupCoordinator
         )
         controller = AssistantController(
             transcription: selectedTranscription,
@@ -287,6 +311,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         super.init()
+        authenticationController.setPresentationAnchorProvider(self)
+        authenticationController.onStateDidChange = { [weak self] in
+            self?.setupCoordinator?.authenticationDidChange()
+        }
         shortcutCoordinator.setPresentSetup { [weak self] in
             self?.presentSetupWindow()
         }
@@ -307,6 +335,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         dictationIndicatorCoordinator.start()
+        authenticationController.start()
 
         #if DEBUG
         presentDebugWindowIfNeeded()
@@ -356,6 +385,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication,
         hasVisibleWindows flag: Bool
     ) -> Bool {
+        // During onboarding, reopens (e.g. Dock clicks) should bring the
+        // setup window forward instead of opening Settings prematurely.
+        if let setupCoordinator, !setupCoordinator.settingsAreUnlocked {
+            presentSetupWindow()
+            return true
+        }
         guard Self.shouldOpenSettingsForReopen(
             acceptsDockReopenRequests: acceptsDockReopenRequests,
             showInDock: appPreferences.showInDock
@@ -386,6 +421,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         if setupWindowController == nil {
             setupWindowController = SetupWindowController(
                 coordinator: setupCoordinator,
+                authentication: authenticationController,
                 dockVisibilityCoordinator: dockVisibilityCoordinator,
                 shortcutRecorderName: shortcutRecorderName
             )
@@ -591,6 +627,29 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         debugWindowCloseDelegate = closeDelegate
     }
     #endif
+}
+
+extension TimbreAppDelegate: AuthenticationPresentationAnchorProviding {
+    func authenticationPresentationAnchor() -> ASPresentationAnchor {
+        if let setupWindow = setupWindowController?.windowForAuthentication {
+            return setupWindow
+        }
+        if let key = NSApp.keyWindow {
+            return key
+        }
+        if let visible = NSApp.windows.first(where: \.isVisible) {
+            return visible
+        }
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1, height: 1),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.alphaValue = 0
+        window.makeKeyAndOrderFront(nil)
+        return window
+    }
 }
 
 #if DEBUG

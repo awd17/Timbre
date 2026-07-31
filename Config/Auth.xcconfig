@@ -1,0 +1,15 @@
+// Shared Timbre OAuth / API build settings (non-secret).
+// Copy Auth.local.xcconfig.example → Auth.local.xcconfig and fill in local values.
+// Auth.local.xcconfig is gitignored.
+
+CLERK_OAUTH_CLIENT_ID = yekjei9EVSqMHepk 
+// Keep the slashes separated so the xcconfig parser does not treat `//` as a comment.
+CLERK_AUTHORIZATION_URL = https:/$()/musical-leech-22.clerk.accounts.dev/oauth/authorize
+CLERK_TOKEN_URL = https:/$()/musical-leech-22.clerk.accounts.dev/oauth/token
+// Debug talks to the local web app; Release uses the hosted Timbre API.
+TIMBRE_API_BASE_URL = https:/$()/timbre.website/
+TIMBRE_API_BASE_URL[config=Debug] = http:/$()/localhost:3000
+TIMBRE_AUTH_CALLBACK_SCHEME = timbre-auth
+TIMBRE_AUTH_REDIRECT_URI = timbre-auth:/$()/oauth/callback
+
+#include? "Auth.local.xcconfig"

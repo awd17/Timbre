@@ -74,6 +74,15 @@ final class TimbreSetupFeatureTests: XCTestCase {
 }
 
 @MainActor
+final class FakeAuthenticationStatus: AuthenticationStatusProviding {
+    var isSignedIn: Bool
+
+    init(isSignedIn: Bool = true) {
+        self.isSignedIn = isSignedIn
+    }
+}
+
+@MainActor
 final class SetupCoordinatorTests: XCTestCase {
     private var defaults: UserDefaults!
     private var suiteName: String!
@@ -98,6 +107,7 @@ final class SetupCoordinatorTests: XCTestCase {
         microphone: FakeMicrophonePermission? = nil,
         accessibility: FakeAccessibilityPermission? = nil,
         shortcut: FakeShortcutOnboarding? = nil,
+        authentication: (any AuthenticationStatusProviding)? = nil,
         featureEnabled: Bool = true
     ) -> SetupCoordinator {
         SetupCoordinator(
@@ -106,6 +116,7 @@ final class SetupCoordinatorTests: XCTestCase {
             accessibility: accessibility ?? FakeAccessibilityPermission(trustState: .trusted),
             defaults: defaults,
             shortcutOnboarding: shortcut ?? FakeShortcutOnboarding(),
+            authentication: authentication ?? FakeAuthenticationStatus(isSignedIn: true),
             featureEnabled: featureEnabled
         )
     }
@@ -141,12 +152,51 @@ final class SetupCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.refreshCallCount, 1)
     }
 
-    func testFreshInstallBeginsAtWelcome() {
+    func testFreshInstallBeginsAtSignInWhenSignedOut() {
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .notInstalled),
+            microphone: FakeMicrophonePermission(status: .undetermined),
+            authentication: FakeAuthenticationStatus(isSignedIn: false)
+        )
+        XCTAssertEqual(coordinator.step, .signIn)
+    }
+
+    func testFreshInstallStartsAtSignInWhenSignedIn() {
         let coordinator = makeCoordinator(
             model: FakeParakeetModelManager(initialState: .notInstalled),
             microphone: FakeMicrophonePermission(status: .undetermined)
         )
-        XCTAssertEqual(coordinator.step, .welcome)
+        // The combined welcome + sign-in screen is the first step.
+        XCTAssertEqual(coordinator.step, .signIn)
+    }
+
+    func testContinueFromSignInAdvancesToShortcut() {
+        let auth = FakeAuthenticationStatus(isSignedIn: false)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .notInstalled),
+            microphone: FakeMicrophonePermission(status: .undetermined),
+            authentication: auth
+        )
+        XCTAssertEqual(coordinator.step, .signIn)
+
+        auth.isSignedIn = true
+        coordinator.authenticationDidChange()
+        XCTAssertEqual(coordinator.step, .signIn)
+
+        coordinator.continueFromSignIn()
+        XCTAssertEqual(coordinator.step, .shortcut)
+    }
+
+    func testCompletedSetupDoesNotForceSignInStep() {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let coordinator = makeCoordinator(
+            model: FakeParakeetModelManager(initialState: .installed),
+            authentication: FakeAuthenticationStatus(isSignedIn: false)
+        )
+        XCTAssertNotEqual(coordinator.step, .signIn)
+        XCTAssertFalse(coordinator.shouldAutoPresent)
     }
 
     func testDefaultShortcutWithoutConfirmationShowsShortcutStep() {
@@ -545,6 +595,48 @@ final class SetupCoordinatorTests: XCTestCase {
         let coordinator = makeCoordinator(model: model, accessibility: accessibility)
         XCTAssertEqual(coordinator.step, .textInsertionDenied)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    @MainActor
+    func testRecheckTextInsertionPromptsForSystemSettingsWhenStillDenied() async {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let accessibility = FakeAccessibilityPermission(
+            trustState: .notTrusted,
+            hasOfferedPrompt: true
+        )
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
+        XCTAssertFalse(coordinator.isRecheckingTextInsertion)
+        XCTAssertFalse(coordinator.textInsertionNeedsSystemSettings)
+
+        coordinator.recheckTextInsertion()
+        XCTAssertTrue(coordinator.isRecheckingTextInsertion)
+
+        await waitUntil(timeout: 4) { coordinator.isRecheckingTextInsertion == false }
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
+        XCTAssertTrue(coordinator.textInsertionNeedsSystemSettings)
+
+        // A later grant clears the prompt and advances to ready.
+        accessibility.trustState = .trusted
+        coordinator.applicationDidBecomeActive()
+        XCTAssertFalse(coordinator.textInsertionNeedsSystemSettings)
+        XCTAssertEqual(coordinator.step, .ready)
+    }
+
+    @MainActor
+    func testSettingsStayLockedUntilReadyWindowAcknowleged() {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let coordinator = makeCoordinator(model: model)
+        // model ready, permissions granted, but user has not dismissed ready window
+        XCTAssertEqual(coordinator.step, .ready)
+        XCTAssertTrue(coordinator.allowsDictation)
+        XCTAssertFalse(coordinator.settingsAreUnlocked)
+
+        coordinator.acknowledgeReadyAndDismiss()
+        XCTAssertTrue(coordinator.settingsAreUnlocked)
+        XCTAssertFalse(coordinator.shouldAutoPresent)
     }
 
     func testAccessibilityGrantRestoresReadyWithoutRedownload() {
