@@ -6,16 +6,19 @@ import SwiftUI
 @MainActor
 final class SetupWindowController: NSObject, NSWindowDelegate {
     private let coordinator: SetupCoordinator
+    private let authentication: AuthenticationController
     private var window: NSWindow?
     private let dockVisibilityCoordinator: DockVisibilityCoordinator
     private let shortcutRecorderName: KeyboardShortcuts.Name
 
     init(
         coordinator: SetupCoordinator,
+        authentication: AuthenticationController,
         dockVisibilityCoordinator: DockVisibilityCoordinator,
         shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     ) {
         self.coordinator = coordinator
+        self.authentication = authentication
         self.dockVisibilityCoordinator = dockVisibilityCoordinator
         self.shortcutRecorderName = shortcutRecorderName
         super.init()
@@ -25,8 +28,16 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         window?.isVisible == true
     }
 
+    /// Presentation anchor for `ASWebAuthenticationSession` while setup is open.
+    var windowForAuthentication: NSWindow? {
+        window
+    }
+
     func present() {
         coordinator.presentRequestedFromMenu()
+        coordinator.onReadyNeedsFocus = { [weak self] in
+            self?.bringReadyWindowToFront()
+        }
         dockVisibilityCoordinator.beginTemporaryPresentation(.onboarding)
 
         if let window, window.isVisible {
@@ -37,7 +48,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         }
 
         let setupWindow = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 600, height: 460),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 400),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -57,6 +68,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         let hostingView = NSHostingView(
             rootView: SetupFlowView(
                 coordinator: coordinator,
+                authentication: authentication,
                 shortcutRecorderName: shortcutRecorderName,
                 onContinueInBackground: { [weak self] in
                     self?.coordinator.continuePreparationInBackground()
@@ -66,7 +78,7 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
                     self?.dismissAfterReady()
                 }
             )
-            .frame(width: 600, height: 460)
+            .frame(width: 600, height: 400)
         )
         // Keep the window's authored size; the flow view stretches to fill it,
         // including under the transparent title bar.
@@ -89,6 +101,15 @@ final class SetupWindowController: NSObject, NSWindowDelegate {
         dockVisibilityCoordinator.activate()
         window = setupWindow
         coordinator.markWindowVisible(true)
+    }
+
+    /// Brings the setup window to the front when the flow settles on the
+    /// "Timbre is ready" step so the user notices the prompt to wrap up.
+    private func bringReadyWindowToFront() {
+        guard let window, window.isVisible else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+        dockVisibilityCoordinator.activate()
     }
 
     func dismissAfterReady() {

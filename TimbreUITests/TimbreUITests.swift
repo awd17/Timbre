@@ -109,13 +109,18 @@ final class TimbreUITests: XCTestCase {
         )
         textInsertionContinue.click()
 
+        // Text-insertion denial now leads with Try Again; a recheck confirms the
+        // permission is still missing, after which the System Settings action
+        // is surfaced.
+        app.buttons["setupAccessibilityRetryButton"].click()
         let accessibilitySettings = app.buttons["setupOpenAccessibilitySettingsButton"]
         XCTAssertTrue(
             accessibilitySettings.waitForExistence(timeout: 5),
             hierarchy(app, "Expected Accessibility denial recovery")
         )
         accessibilitySettings.click()
-        app.buttons["setupAccessibilityRetryButton"].click()
+        // Granting Accessibility lets the in-window permission monitor move on
+        // automatically (or via a subsequent recheck).
 
         XCTAssertTrue(
             app.descendants(matching: .any)["setupProgress"].waitForExistence(timeout: 5),
@@ -384,11 +389,20 @@ final class TimbreUITests: XCTestCase {
 
         app = relaunchBackground(scenario: "accessibilityRevoked", menuHost: true)
         XCTAssertTrue(
-            app.buttons["setupOpenAccessibilitySettingsButton"].waitForExistence(timeout: 5),
+            app.buttons["setupAccessibilityRetryButton"].waitForExistence(timeout: 5),
             hierarchy(app, "Missing Accessibility recovery")
         )
-        app.buttons["setupOpenAccessibilitySettingsButton"].click()
+        // Try Again rechecks first; only after a failed recheck does the System
+        // Settings action appear.
         app.buttons["setupAccessibilityRetryButton"].click()
+        let accessibilitySettings = app.buttons["setupOpenAccessibilitySettingsButton"]
+        XCTAssertTrue(
+            accessibilitySettings.waitForExistence(timeout: 5),
+            hierarchy(app, "Missing Accessibility recovery")
+        )
+        accessibilitySettings.click()
+        // Granting Accessibility moves forward once the in-window monitor
+        // notices the trust change.
         if app.buttons["setupDoneButton"].waitForExistence(timeout: 3) {
             app.buttons["setupDoneButton"].click()
         }
@@ -467,8 +481,10 @@ final class TimbreUITests: XCTestCase {
 
     @MainActor
     private func completeWelcomeAndRecordShortcut(in app: XCUIApplication) throws {
-        let welcome = app.buttons["setupContinueButton"]
-        XCTAssertTrue(welcome.waitForExistence(timeout: 10), hierarchy(app, "Missing Welcome"))
+        // The welcome + sign-in page is a single step; the integration runtime
+        // is always authenticated, so the way forward is the Continue button.
+        let welcome = app.buttons["setupSignInContinueButton"]
+        XCTAssertTrue(welcome.waitForExistence(timeout: 10), hierarchy(app, "Missing combined welcome + sign-in"))
         welcome.click()
 
         let shortcutContinue = app.buttons["setupShortcutContinueButton"]

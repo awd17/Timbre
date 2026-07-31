@@ -1,0 +1,11 @@
+// Local overrides for Timbre native auth. Copy to Auth.local.xcconfig (gitignored).
+// Values come from Clerk Dashboard → OAuth applications (public client) and
+// https://<your-clerk-frontend-api>/.well-known/oauth-authorization-server
+
+CLERK_OAUTH_CLIENT_ID = YOUR_CLERK_OAUTH_CLIENT_ID
+// Keep the slashes separated so the xcconfig parser does not treat `//` as a comment.
+CLERK_AUTHORIZATION_URL = https:/$()/YOUR_INSTANCE.clerk.accounts.dev/oauth/authorize
+CLERK_TOKEN_URL = https:/$()/YOUR_INSTANCE.clerk.accounts.dev/oauth/token
+TIMBRE_API_BASE_URL = https:/$()/YOUR_TIMBRE_WEB_HOST
+TIMBRE_AUTH_CALLBACK_SCHEME = timbre-auth
+TIMBRE_AUTH_REDIRECT_URI = timbre-auth:/$()/oauth/callback

@@ -1,7 +1,7 @@
 import Foundation
 
 enum SetupFlowStep: Equatable {
-    case welcome
+    case signIn
     case shortcut
     case microphone
     case microphoneDenied
@@ -13,6 +13,7 @@ enum SetupFlowStep: Equatable {
 }
 
 private struct SetupFacts: Equatable {
+    let isAuthenticated: Bool
     let completedWelcome: Bool
     let dismissedReady: Bool
     let completedShortcutOnboarding: Bool
@@ -32,6 +33,7 @@ private enum SetupEffect: Equatable {
 
 private enum SetupIntent {
     case refresh
+    case continueSignIn
     case continueWelcome
     case continueShortcut
     case requestMicrophone
@@ -52,8 +54,17 @@ private struct SetupMenuChrome: Equatable {
 
 private enum SetupPolicy {
     static func decision(for facts: SetupFacts) -> SetupDecision {
+        // First-run / incomplete setup requires the combined welcome + sign-in step.
+        // The screen serves newcomers both as a welcome page and the sign-in gate.
+        // Users who already finished onboarding manage auth from Settings / menu.
+        if !facts.isAuthenticated, !facts.dismissedReady {
+            return SetupDecision(step: .signIn, effect: .none)
+        }
+
+        // Signed-in newcomers still land on the combined welcome screen until they
+        // advance; afterwards the auth state lives in the menu / Settings flow.
         guard facts.completedWelcome || facts.dismissedReady || facts.model.isInstalled else {
-            return SetupDecision(step: .welcome, effect: .none)
+            return SetupDecision(step: .signIn, effect: .none)
         }
 
         if !facts.completedShortcutOnboarding || !facts.hasAssignedShortcut {
@@ -159,7 +170,7 @@ private enum SetupPolicy {
     }
 }
 
-/// Coordinates first-run setup: welcome → shortcut → mic → text insertion → install → ready.
+/// Coordinates first-run setup: sign-in → welcome → shortcut → mic → text insertion → install → ready.
 /// Closing the UI must not cancel `ParakeetModelManaging.ensureInstalled()`.
 @MainActor
 @Observable
@@ -169,21 +180,35 @@ final class SetupCoordinator {
     static let completedShortcutOnboardingKey =
         UserDefaultsOnboardingPreferences.completedShortcutOnboardingKey
 
-    private(set) var step: SetupFlowStep = .welcome
+    private(set) var step: SetupFlowStep = .signIn
     private(set) var isWindowVisible = false
+    /// Re-checking text-insertion access after the user pressed Try Again on the
+    /// denied page. UI uses this to show a loading state before deciding whether
+    /// to push the user toward System Settings.
+    private(set) var isRecheckingTextInsertion = false
+    /// Set to true once a text-insertion recheck has confirmed the permission is
+    /// still missing, so the denied page surfaces the System Settings action.
+    private(set) var textInsertionNeedsSystemSettings = false
 
     private let modelManager: any ParakeetModelManaging
     private let microphone: any MicrophonePermissionProviding
     private let accessibility: any AccessibilityPermissionProviding
     private let preferences: any OnboardingPreferencesProviding
     let shortcutOnboarding: any ShortcutOnboardingProviding
+    private let authentication: (any AuthenticationStatusProviding)?
     private let featureEnabled: Bool
     private var inFlightEffect: SetupEffect?
     private var effectTask: Task<Void, Never>?
     private var permissionMonitorTask: Task<Void, Never>?
+    private var recheckTask: Task<Void, Never>?
     private var previousAllowsDictation: Bool?
+    /// After an in-session sign-in succeeds, keep the sign-in step visible until Continue.
+    private var awaitingSignInContinue = false
 
     var onReadinessChanged: ((Bool) -> Void)?
+    /// Fired when the flow settles on the `.ready` step so the hosting window can
+    /// be brought to the front and made key.
+    var onReadyNeedsFocus: (() -> Void)?
 
     init(
         modelManager: any ParakeetModelManaging,
@@ -191,6 +216,7 @@ final class SetupCoordinator {
         accessibility: any AccessibilityPermissionProviding,
         preferences: any OnboardingPreferencesProviding,
         shortcutOnboarding: any ShortcutOnboardingProviding,
+        authentication: (any AuthenticationStatusProviding)? = nil,
         featureEnabled: Bool
     ) {
         self.modelManager = modelManager
@@ -198,6 +224,7 @@ final class SetupCoordinator {
         self.accessibility = accessibility
         self.preferences = preferences
         self.shortcutOnboarding = shortcutOnboarding
+        self.authentication = authentication
         self.featureEnabled = featureEnabled
         reconcileInitialStep()
     }
@@ -209,6 +236,7 @@ final class SetupCoordinator {
         accessibility: any AccessibilityPermissionProviding,
         defaults: UserDefaults,
         shortcutOnboarding: any ShortcutOnboardingProviding,
+        authentication: (any AuthenticationStatusProviding)? = nil,
         featureEnabled: Bool
     ) {
         self.init(
@@ -217,6 +245,7 @@ final class SetupCoordinator {
             accessibility: accessibility,
             preferences: UserDefaultsOnboardingPreferences(defaults: defaults),
             shortcutOnboarding: shortcutOnboarding,
+            authentication: authentication,
             featureEnabled: featureEnabled
         )
     }
@@ -226,6 +255,7 @@ final class SetupCoordinator {
         modelManager: any ParakeetModelManaging,
         microphone: any MicrophonePermissionProviding,
         accessibility: any AccessibilityPermissionProviding,
+        authentication: (any AuthenticationStatusProviding)? = nil,
         featureEnabled: Bool
     ) {
         self.init(
@@ -234,6 +264,7 @@ final class SetupCoordinator {
             accessibility: accessibility,
             preferences: UserDefaultsOnboardingPreferences(),
             shortcutOnboarding: KeyboardShortcutsOnboardingAdapter(),
+            authentication: authentication,
             featureEnabled: featureEnabled
         )
     }
@@ -248,6 +279,7 @@ final class SetupCoordinator {
 
     private var facts: SetupFacts {
         SetupFacts(
+            isAuthenticated: authentication?.isSignedIn ?? false,
             completedWelcome: preferences.completedWelcome,
             dismissedReady: preferences.dismissedReady,
             completedShortcutOnboarding: preferences.completedShortcutOnboarding,
@@ -268,6 +300,14 @@ final class SetupCoordinator {
     /// True while setup must complete before the normal dictation UI is shown.
     var blocksDictationUI: Bool {
         featureEnabled && !allowsDictation
+    }
+
+    /// Settings may be exposed only once onboarding is fully finished: the model
+    /// is ready AND the user has dismissed the (re-shown) ready window. While the
+    /// ready window is open, Settings stays hidden so the user must acknowledge it.
+    var settingsAreUnlocked: Bool {
+        guard featureEnabled else { return true }
+        return allowsDictation && preferences.dismissedReady
     }
 
     var shouldAutoPresent: Bool {
@@ -331,6 +371,28 @@ final class SetupCoordinator {
         reconcile(intent: .refresh)
     }
 
+    /// Reconcile when Clerk auth state changes (sign-in, restore, sign-out).
+    func authenticationDidChange() {
+        guard featureEnabled else { return }
+        if step == .signIn, facts.isAuthenticated, !preferences.dismissedReady {
+            awaitingSignInContinue = true
+        }
+        if !facts.isAuthenticated {
+            awaitingSignInContinue = false
+        }
+        reconcile(intent: .refresh)
+    }
+
+    func continueFromSignIn() {
+        guard facts.isAuthenticated else {
+            TimbreLog.line("Timbre onboarding: continue from sign-in blocked (not authenticated)")
+            return
+        }
+        TimbreLog.line("Timbre onboarding: continue from sign-in")
+        awaitingSignInContinue = false
+        reconcile(intent: .continueSignIn)
+    }
+
     func continueFromWelcome() {
         TimbreLog.line("Timbre onboarding: continue from welcome")
         reconcile(intent: .continueWelcome)
@@ -355,6 +417,30 @@ final class SetupCoordinator {
 
     func requestTextInsertionAccess() {
         reconcile(intent: .requestAccessibility)
+    }
+
+    /// Re-reads the live Accessibility trust state. Used by the denied
+    /// text-insertion page's Try Again button: it flashes a loading wheel while
+    /// we re-check, and only escalates to instructing the user to open System
+    /// Settings when a recheck confirms the permission is still missing.
+    func recheckTextInsertion() {
+        guard step == .textInsertionDenied else { return }
+        guard !isRecheckingTextInsertion else { return }
+        isRecheckingTextInsertion = true
+        recheckTask?.cancel()
+        recheckTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isRecheckingTextInsertion = false
+                self.reconcile(intent: .refresh)
+                // If we are still denied after the recheck, surface the System
+                // Settings call-to-action. A grant would have advanced the step.
+                self.textInsertionNeedsSystemSettings = (self.step == .textInsertionDenied)
+            }
+        }
+        TimbreLog.line("Timbre onboarding: rechecking text-insertion permission")
     }
 
     func retryAfterFailure() {
@@ -395,7 +481,7 @@ final class SetupCoordinator {
 
     private func reconcileInitialStep() {
         guard featureEnabled else {
-            step = .welcome
+            step = .signIn
             return
         }
 
@@ -438,6 +524,9 @@ final class SetupCoordinator {
         switch intent {
         case .refresh:
             requestedEffect = nil
+        case .continueSignIn:
+            preferences.completedWelcome = true
+            requestedEffect = nil
         case .continueWelcome:
             preferences.completedWelcome = true
             requestedEffect = nil
@@ -464,8 +553,24 @@ final class SetupCoordinator {
 
         clearStaleReadyPreferenceIfNeeded()
         let decision = SetupPolicy.decision(for: facts)
-        step = intent == .retryInstall ? .preparing : decision.step
+        var nextStep = intent == .retryInstall ? SetupFlowStep.preparing : decision.step
+        if awaitingSignInContinue,
+           facts.isAuthenticated,
+           intent != .continueSignIn,
+           !facts.dismissedReady
+        {
+            nextStep = .signIn
+        }
+        step = nextStep
         if step != previousStep {
+            if previousStep == .textInsertionDenied {
+                textInsertionNeedsSystemSettings = false
+                isRecheckingTextInsertion = false
+                recheckTask?.cancel()
+            }
+            if step == .ready {
+                onReadyNeedsFocus?()
+            }
             TimbreLog.line("Timbre onboarding: step \(previousStep) → \(step)")
         }
 

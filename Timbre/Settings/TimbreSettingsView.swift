@@ -6,6 +6,7 @@ struct TimbreSettingsView: View {
     @ObservedObject var inputDevices: CoreAudioInputDeviceManager
     @ObservedObject var playbackController: DictationPlaybackController
     var controller: AssistantController
+    @Bindable var authentication: AuthenticationController
     let shortcutState: KeyboardShortcutsOnboardingAdapter
     let shortcutName: KeyboardShortcuts.Name
     let bundleInformation: any BundleInformationProviding
@@ -19,6 +20,10 @@ struct TimbreSettingsView: View {
     var body: some View {
         ScrollView {
             Form {
+                Section("Account") {
+                    accountSection
+                }
+
                 Section("General") {
                     LabeledContent {
                         KeyboardShortcuts.Recorder(
@@ -164,6 +169,43 @@ struct TimbreSettingsView: View {
             Text(
                 "This resets Timbre’s shortcut, microphone, playback, Dock, clipboard, and overlay settings. Setup and downloaded models are kept."
             )
+        }
+    }
+
+    @ViewBuilder
+    private var accountSection: some View {
+        switch authentication.state {
+        case .signedOut:
+            LabeledContent("Status", value: "Signed out")
+            Button("Sign In…") {
+                authentication.signIn()
+            }
+            .accessibilityIdentifier("settingsSignIn")
+        case .signingIn:
+            LabeledContent("Status", value: "Signing in…")
+            ProgressView()
+                .controlSize(.small)
+                .accessibilityIdentifier("settingsSignInProgress")
+        case .signedIn(let user):
+            LabeledContent("Name", value: user.displayName)
+                .accessibilityIdentifier("settingsAccountName")
+            if let email = user.email, !email.isEmpty {
+                LabeledContent("Email", value: email)
+                    .accessibilityIdentifier("settingsAccountEmail")
+            }
+            Button("Sign Out") {
+                authentication.signOut()
+            }
+            .accessibilityIdentifier("settingsSignOut")
+        case .error(let message):
+            Text(message)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("settingsSignInError")
+            Button("Try Again") {
+                authentication.retry()
+            }
+            .accessibilityIdentifier("settingsSignInRetry")
         }
     }
 

@@ -31,3 +31,6 @@ Packages/
 
 # Keep Timbre.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved tracked
 # so FluidAudio stays pinned for the Parakeet smoke-test target.
+
+# Local OAuth / API configuration (may contain environment-specific client IDs)
+Config/Auth.local.xcconfig

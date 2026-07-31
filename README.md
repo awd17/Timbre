@@ -98,6 +98,15 @@ open Timbre.xcodeproj
 Select the **Timbre** scheme, choose your Development Team under **Signing &
 Capabilities**, and press `Command` + `R`.
 
+For Clerk native sign-in, copy the example auth config and fill in local values:
+
+```bash
+cp Config/Auth.local.xcconfig.example Config/Auth.local.xcconfig
+```
+
+See [`docs/NATIVE_AUTH.md`](docs/NATIVE_AUTH.md) for Clerk Dashboard, callback URL,
+and `/api/me` verification notes.
+
 From the command line:
 
 ```bash

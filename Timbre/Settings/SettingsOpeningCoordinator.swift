@@ -4,11 +4,24 @@ import SwiftUI
 @MainActor
 final class SettingsOpeningCoordinator {
     private let dockVisibilityCoordinator: DockVisibilityCoordinator
+    /// First-run setup coordinator, if any. While its onboarding flow (including
+    /// the download phase and the "ready" window) has not finished, Settings
+    /// stays hidden so users can't change things mid-setup.
+    private weak var setupCoordinator: SetupCoordinator?
     private var openAction: (() -> Void)?
     private var hasPendingOpen = false
 
-    init(dockVisibilityCoordinator: DockVisibilityCoordinator) {
+    init(
+        dockVisibilityCoordinator: DockVisibilityCoordinator,
+        setupCoordinator: SetupCoordinator? = nil
+    ) {
         self.dockVisibilityCoordinator = dockVisibilityCoordinator
+        self.setupCoordinator = setupCoordinator
+    }
+
+    /// True when the Settings UI is allowed to appear right now.
+    var canOpenSettings: Bool {
+        setupCoordinator?.settingsAreUnlocked ?? true
     }
 
     func install(openAction: @escaping () -> Void) {
@@ -19,6 +32,10 @@ final class SettingsOpeningCoordinator {
     }
 
     func open() {
+        guard canOpenSettings else {
+            TimbreLog.line("Timbre: settings open suppressed until setup is complete")
+            return
+        }
         guard let openAction else {
             hasPendingOpen = true
             return

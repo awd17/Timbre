@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SetupFlowView: View {
     @Bindable var coordinator: SetupCoordinator
+    @Bindable var authentication: AuthenticationController
     var shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     var onContinueInBackground: (() -> Void)?
     var onDone: () -> Void
@@ -18,7 +19,15 @@ struct SetupFlowView: View {
             Image("OnboardingBackground")
                 .resizable()
                 .scaledToFill()
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                // Anchor the art to the bottom so a shorter window crops the
+                // top of the image (its filler space) instead of the bottom.
+                .frame(
+                    minWidth: 0,
+                    maxWidth: .infinity,
+                    minHeight: 0,
+                    maxHeight: .infinity,
+                    alignment: .bottom
+                )
                 .clipped()
                 .ignoresSafeArea()
                 .accessibilityHidden(true)
@@ -39,8 +48,8 @@ struct SetupFlowView: View {
                 .id(coordinator.step)
                 .transition(.opacity)
                 .padding(.horizontal, 44)
-                .padding(.top, 36)
-                .padding(.bottom, 30)
+                .padding(.top, 24)
+                .padding(.bottom, 18)
                 .foregroundStyle(.white)
         }
         .animation(.easeInOut(duration: 0.25), value: coordinator.step)
@@ -55,8 +64,8 @@ struct SetupFlowView: View {
     @ViewBuilder
     private var stepContent: some View {
         switch coordinator.step {
-        case .welcome:
-            welcome
+        case .signIn:
+            signIn
         case .shortcut:
             shortcut
         case .microphone:
@@ -78,6 +87,9 @@ struct SetupFlowView: View {
 
     // MARK: - Scaffold
 
+    /// Shared layout for an onboarding step. The hero and headline anchor
+    /// toward the upper third of the window; the footer action(s) pin to the
+    /// bottom so the user always knows where to find the way forward.
     private func stepScaffold<Hero: View, Content: View, Footer: View>(
         title: String,
         subtitle: String,
@@ -87,23 +99,26 @@ struct SetupFlowView: View {
     ) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-            hero()
-            Text(title)
-                .font(.system(size: 26, weight: .semibold, design: .rounded))
-                .accessibilityAddTraits(.isHeader)
-                .padding(.top, 20)
-            if !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: 14))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .frame(maxWidth: 400)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 9)
+            VStack(spacing: 18) {
+                hero()
+                VStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 27, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .accessibilityAddTraits(.isHeader)
+                    if !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(.white.opacity(0.72))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(4)
+                            .frame(maxWidth: 380)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                content()
             }
-            content()
-            Spacer(minLength: 0)
+            Spacer(minLength: 18)
             footer()
         }
         .frame(maxWidth: .infinity)
@@ -122,38 +137,131 @@ struct SetupFlowView: View {
         Image("OnboardingAppIcon")
             .resizable()
             .interpolation(.high)
-            .frame(width: 92, height: 92)
+            .frame(width: 84, height: 84)
             .shadow(color: .black.opacity(0.5), radius: 18, y: 10)
             .accessibilityHidden(true)
     }
 
     private func symbolHero(_ systemName: String) -> some View {
+        symbolHero(systemName, tint: .white)
+    }
+
+    private func symbolHero(_ systemName: String, tint: Color) -> some View {
         Image(systemName: systemName)
-            .font(.system(size: 25, weight: .medium))
-            .foregroundStyle(.white)
-            .frame(width: 62, height: 62)
-            .background(.white.opacity(0.10), in: Circle())
-            .overlay(Circle().strokeBorder(.white.opacity(0.20), lineWidth: 1))
+            .font(.system(size: 25, weight: .semibold))
+            .foregroundStyle(tint)
+            .frame(width: 60, height: 60)
+            .background(
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.16), Color.white.opacity(0.06)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            )
+            .overlay(Circle().strokeBorder(.white.opacity(0.22), lineWidth: 1))
             .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
             .accessibilityHidden(true)
     }
 
     // MARK: - Steps
 
-    private var welcome: some View {
-        stepScaffold(
+    /// Combined welcome + sign-in screen. Newcomers see the app icon, a friendly
+    /// welcome headline, and the sign-in controls all in one place.
+    private var signIn: some View {
+        let authState = authentication.state
+        return stepScaffold(
             title: "Welcome to Timbre",
-            subtitle: "Voice dictation for your Mac.\nSet it up once, then dictate anywhere.",
+            subtitle: signInSubtitle(for: authState),
             hero: { appIconHero },
+            content: {
+                signInContent(for: authState)
+                    .padding(.top, 20)
+            },
             footer: {
-                Button("Continue") {
-                    coordinator.continueFromWelcome()
-                }
-                .buttonStyle(OnboardingPrimaryButtonStyle())
-                .keyboardShortcut(.defaultAction)
-                .accessibilityIdentifier("setupContinueButton")
+                signInFooter(for: authState)
             }
         )
+    }
+
+    private func signInSubtitle(for state: AuthenticationState) -> String {
+        switch state {
+        case .signedOut:
+            return "Voice dictation for your Mac. Sign in to sync your account and finish setup."
+        case .signingIn:
+            return "Complete sign-in in your browser, then return here."
+        case .signedIn:
+            return "You're signed in. Continue to finish setting up Timbre."
+        case .error:
+            return "Something went wrong. You can try again."
+        }
+    }
+
+    @ViewBuilder
+    private func signInContent(for state: AuthenticationState) -> some View {
+        switch state {
+        case .signingIn:
+            ProgressView()
+                .controlSize(.small)
+                .tint(.white)
+                .accessibilityIdentifier("setupSignInProgress")
+        case .signedIn(let user):
+            VStack(spacing: 6) {
+                Text(user.displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .accessibilityIdentifier("setupSignInDisplayName")
+                if let email = user.email, !email.isEmpty, email != user.displayName {
+                    Text(email)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .accessibilityIdentifier("setupSignInEmail")
+                }
+            }
+        case .error(let message):
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.85))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+                .accessibilityIdentifier("setupSignInError")
+        case .signedOut:
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func signInFooter(for state: AuthenticationState) -> some View {
+        switch state {
+        case .signedOut:
+            Button("Sign In") {
+                authentication.signIn()
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("setupSignInButton")
+        case .signingIn:
+            Button("Cancel") {
+                authentication.cancelSignIn()
+            }
+            .buttonStyle(OnboardingSecondaryButtonStyle())
+            .accessibilityIdentifier("setupSignInCancelButton")
+        case .signedIn:
+            Button("Continue") {
+                coordinator.continueFromSignIn()
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("setupSignInContinueButton")
+        case .error:
+            Button("Try Again") {
+                authentication.retry()
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("setupSignInRetryButton")
+        }
     }
 
     private var shortcut: some View {
@@ -295,27 +403,77 @@ struct SetupFlowView: View {
     }
 
     private var textInsertionDenied: some View {
-        stepScaffold(
+        let isRechecking = coordinator.isRecheckingTextInsertion
+        let needsSettings = coordinator.textInsertionNeedsSystemSettings
+        return stepScaffold(
             title: "Text Insertion",
-            subtitle: "Text insertion access is turned off. Enable \(applicationDisplayName) in System Settings to continue.",
+            subtitle: textInsertionDeniedSubtitle(needsSettings: needsSettings, isRechecking: isRechecking),
             hero: { symbolHero("character.cursor.ibeam") },
+            content: { EmptyView() },
             footer: {
-                HStack(spacing: 10) {
-                    Button("Open System Settings") {
-                        coordinator.openAccessibilitySettings()
-                    }
-                    .buttonStyle(OnboardingSecondaryButtonStyle())
-                    .accessibilityIdentifier("setupOpenAccessibilitySettingsButton")
-
-                    Button("Try Again") {
-                        coordinator.requestTextInsertionAccess()
-                    }
-                    .buttonStyle(OnboardingPrimaryButtonStyle())
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier("setupAccessibilityRetryButton")
-                }
+                textInsertionDeniedFooter(
+                    isRechecking: isRechecking,
+                    needsSettings: needsSettings
+                )
             }
         )
+    }
+
+    private func textInsertionDeniedSubtitle(
+        needsSettings: Bool,
+        isRechecking: Bool
+    ) -> String {
+        if isRechecking {
+            return "Re-checking System Settings…"
+        }
+        if needsSettings {
+            return "Timbre still can't insert text. Open System Settings, enable \(applicationDisplayName), then come back here."
+        }
+        return "We couldn't confirm text-insertion access. Try again to recheck."
+    }
+
+    @ViewBuilder
+    private func textInsertionDeniedFooter(
+        isRechecking: Bool,
+        needsSettings: Bool
+    ) -> some View {
+        if isRechecking {
+            Button {
+                // Recheck in progress; ignore taps while loading.
+            } label: {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.white)
+                    Text("Rechecking…")
+                }
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .disabled(true)
+            .accessibilityIdentifier("setupAccessibilityRecheckingButton")
+        } else if needsSettings {
+            HStack(spacing: 10) {
+                Button("Try Again") {
+                    coordinator.recheckTextInsertion()
+                }
+                .buttonStyle(OnboardingSecondaryButtonStyle())
+                .keyboardShortcut(.defaultAction)
+                .accessibilityIdentifier("setupAccessibilityRetryButton")
+
+                Button("Open System Settings") {
+                    coordinator.openAccessibilitySettings()
+                }
+                .buttonStyle(OnboardingPrimaryButtonStyle())
+                .accessibilityIdentifier("setupOpenAccessibilitySettingsButton")
+            }
+        } else {
+            Button("Try Again") {
+                coordinator.recheckTextInsertion()
+            }
+            .buttonStyle(OnboardingPrimaryButtonStyle())
+            .keyboardShortcut(.defaultAction)
+            .accessibilityIdentifier("setupAccessibilityRetryButton")
+        }
     }
 
     private var applicationDisplayName: String {
