@@ -17,6 +17,7 @@ final class AuthenticationController {
     private var credentials: OAuthCredentials?
     private var restoreTask: Task<Void, Never>?
     private var signInTask: Task<Void, Never>?
+    private var authenticationOperationID = UUID()
     private weak var presentationAnchorProvider: AuthenticationPresentationAnchorProviding?
     #if DEBUG
     /// Testing seam: lets the integration runtime plant a signed-in session
@@ -47,49 +48,55 @@ final class AuthenticationController {
     }
 
     func start() {
-        restoreTask?.cancel()
+        invalidateCurrentOperation()
+        authService.cancelSignIn()
+        let operationID = beginOperation()
         restoreTask = Task { [weak self] in
-            await self?.restoreSession()
+            await self?.restoreSession(operationID: operationID)
         }
     }
 
     func signIn() {
         guard !state.isSigningIn else { return }
-        signInTask?.cancel()
+        invalidateCurrentOperation()
         authService.cancelSignIn()
 
+        let operationID = beginOperation()
         apply(.signingIn)
         signInTask = Task { [weak self] in
-            await self?.performSignIn()
+            await self?.performSignIn(operationID: operationID)
         }
     }
 
     /// Cancels an in-flight browser session without clearing saved credentials.
     func cancelSignIn() {
         guard state.isSigningIn else { return }
-        signInTask?.cancel()
+        let shouldRestoreStoredCredentials = credentials != nil
+        invalidateCurrentOperation()
         authService.cancelSignIn()
-        if credentials != nil {
-            restoreTask?.cancel()
+        let operationID = beginOperation()
+        if shouldRestoreStoredCredentials {
+            apply(.signingIn)
             restoreTask = Task { [weak self] in
-                await self?.refreshProfileUsingStoredCredentials()
+                await self?.refreshProfileUsingStoredCredentials(operationID: operationID)
             }
         } else {
+            credentials = nil
             apply(.signedOut)
             TimbreLog.line("Timbre auth: sign-in cancelled")
         }
     }
 
     func signOut() {
-        signInTask?.cancel()
-        restoreTask?.cancel()
+        invalidateCurrentOperation()
         authService.cancelSignIn()
-        credentials = nil
         do {
             try credentialStore.clearCredentials()
         } catch {
             TimbreLog.line("Timbre auth: failed to clear Keychain credentials")
+            return
         }
+        credentials = nil
         apply(.signedOut)
         TimbreLog.line("Timbre auth: signed out")
     }
@@ -97,10 +104,11 @@ final class AuthenticationController {
     func retry() {
         switch state {
         case .error where credentials != nil:
+            invalidateCurrentOperation()
+            let operationID = beginOperation()
             apply(.signingIn)
-            restoreTask?.cancel()
             restoreTask = Task { [weak self] in
-                await self?.refreshProfileUsingStoredCredentials()
+                await self?.refreshProfileUsingStoredCredentials(operationID: operationID)
             }
         case .error, .signedOut:
             signIn()
@@ -132,7 +140,9 @@ final class AuthenticationController {
         onStateDidChange?()
     }
 
-    private func restoreSession() async {
+    private func restoreSession(operationID: UUID) async {
+        guard isCurrent(operationID) else { return }
+
         #if DEBUG
         if debugSuppressSessionRestore {
             return
@@ -140,6 +150,7 @@ final class AuthenticationController {
         #endif
 
         guard configuration.isConfigured else {
+            guard isCurrent(operationID) else { return }
             apply(.signedOut)
             return
         }
@@ -148,11 +159,13 @@ final class AuthenticationController {
         do {
             stored = try credentialStore.loadCredentials()
         } catch {
+            guard isCurrent(operationID) else { return }
             TimbreLog.line("Timbre auth: Keychain load failed")
             apply(.signedOut)
             return
         }
 
+        guard isCurrent(operationID) else { return }
         guard let stored else {
             apply(.signedOut)
             return
@@ -160,11 +173,14 @@ final class AuthenticationController {
 
         credentials = stored
         apply(.signingIn)
-        await refreshProfileUsingStoredCredentials()
+        await refreshProfileUsingStoredCredentials(operationID: operationID)
     }
 
-    private func performSignIn() async {
+    private func performSignIn(operationID: UUID) async {
+        guard isCurrent(operationID) else { return }
+
         guard configuration.isConfigured else {
+            guard isCurrent(operationID) else { return }
             apply(.error(AuthenticationError.notConfigured.localizedDescription))
             return
         }
@@ -174,18 +190,24 @@ final class AuthenticationController {
 
         do {
             let newCredentials = try await authService.signIn(presentationAnchor: anchor)
+            guard isCurrent(operationID) else { return }
             try credentialStore.saveCredentials(newCredentials)
+            guard isCurrent(operationID) else { return }
             credentials = newCredentials
             TimbreLog.line("Timbre auth: token exchange succeeded")
-            let user = try await fetchMeWithRefresh()
+            let user = try await fetchMeWithRefresh(operationID: operationID)
+            guard isCurrent(operationID) else { return }
             apply(.signedIn(user))
             TimbreLog.line("Timbre auth: signed in userId=\(user.userId)")
         } catch is CancellationError {
+            guard isCurrent(operationID) else { return }
             apply(.signedOut)
         } catch let error as AuthenticationError where error == .cancelled {
+            guard isCurrent(operationID) else { return }
             apply(.signedOut)
             TimbreLog.line("Timbre auth: sign-in cancelled")
         } catch {
+            guard isCurrent(operationID) else { return }
             credentials = nil
             try? credentialStore.clearCredentials()
             apply(.error(Self.userFacingMessage(for: error)))
@@ -193,49 +215,88 @@ final class AuthenticationController {
         }
     }
 
-    private func refreshProfileUsingStoredCredentials() async {
+    private func refreshProfileUsingStoredCredentials(operationID: UUID) async {
+        guard isCurrent(operationID) else { return }
+
         do {
-            let user = try await fetchMeWithRefresh()
+            let user = try await fetchMeWithRefresh(operationID: operationID)
+            guard isCurrent(operationID) else { return }
             apply(.signedIn(user))
             TimbreLog.line("Timbre auth: session restored userId=\(user.userId)")
         } catch TimbreAPIError.unauthorized {
+            guard isCurrent(operationID) else { return }
             credentials = nil
             try? credentialStore.clearCredentials()
             apply(.error(TimbreAPIError.unauthorized.localizedDescription))
             TimbreLog.line("Timbre auth: session unauthorized")
         } catch {
+            guard isCurrent(operationID) else { return }
             apply(.error(Self.userFacingMessage(for: error)))
             TimbreLog.line("Timbre auth: session restore failed")
         }
     }
 
-    private func fetchMeWithRefresh() async throws -> MeUser {
+    private func fetchMeWithRefresh(operationID: UUID) async throws -> MeUser {
+        guard isCurrent(operationID) else { throw CancellationError() }
         guard var current = credentials else {
             throw TimbreAPIError.missingCredentials
         }
 
         if current.isAccessTokenExpired {
-            current = try await refreshAndPersist(current)
+            current = try await refreshAndPersist(current, operationID: operationID)
+            guard isCurrent(operationID) else { throw CancellationError() }
         }
 
         do {
-            return try await apiClient.fetchMe(accessToken: current.accessToken)
+            let user = try await apiClient.fetchMe(accessToken: current.accessToken)
+            guard isCurrent(operationID) else { throw CancellationError() }
+            return user
         } catch TimbreAPIError.unauthorized {
-            current = try await refreshAndPersist(current)
-            return try await apiClient.fetchMe(accessToken: current.accessToken)
+            guard isCurrent(operationID) else { throw CancellationError() }
+            current = try await refreshAndPersist(current, operationID: operationID)
+            guard isCurrent(operationID) else { throw CancellationError() }
+            let user = try await apiClient.fetchMe(accessToken: current.accessToken)
+            guard isCurrent(operationID) else { throw CancellationError() }
+            return user
         }
     }
 
-    private func refreshAndPersist(_ current: OAuthCredentials) async throws -> OAuthCredentials {
+    private func refreshAndPersist(
+        _ current: OAuthCredentials,
+        operationID: UUID
+    ) async throws -> OAuthCredentials {
         do {
+            guard isCurrent(operationID) else { throw CancellationError() }
             let refreshed = try await authService.refreshCredentials(current)
+            guard isCurrent(operationID) else { throw CancellationError() }
             try credentialStore.saveCredentials(refreshed)
+            guard isCurrent(operationID) else { throw CancellationError() }
             credentials = refreshed
             TimbreLog.line("Timbre auth: access token refreshed")
             return refreshed
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw AuthenticationError.refreshFailed(nil)
         }
+    }
+
+    private func invalidateCurrentOperation() {
+        signInTask?.cancel()
+        restoreTask?.cancel()
+        signInTask = nil
+        restoreTask = nil
+        authenticationOperationID = UUID()
+    }
+
+    private func beginOperation() -> UUID {
+        let operationID = UUID()
+        authenticationOperationID = operationID
+        return operationID
+    }
+
+    private func isCurrent(_ operationID: UUID) -> Bool {
+        operationID == authenticationOperationID && !Task.isCancelled
     }
 
     private func fallbackPresentationAnchor() -> ASPresentationAnchor {

@@ -162,6 +162,7 @@ final class AuthenticationStateTests: XCTestCase {
 
 final class InMemoryCredentialStore: CredentialStoring {
     private var credentials: OAuthCredentials?
+    var clearError: Error?
 
     func loadCredentials() throws -> OAuthCredentials? { credentials }
 
@@ -170,6 +171,7 @@ final class InMemoryCredentialStore: CredentialStoring {
     }
 
     func clearCredentials() throws {
+        if let clearError { throw clearError }
         credentials = nil
     }
 }
@@ -218,7 +220,72 @@ final class FakeTimbreAPIClient: TimbreAPIClienting {
 }
 
 @MainActor
+final class SuspendingAuthenticationService: AuthenticationServicing {
+    var credentialsToReturn: OAuthCredentials?
+    var signInStarted = false
+    var signInFinished = false
+    var cancelCount = 0
+    private var signInContinuation: CheckedContinuation<OAuthCredentials, Error>?
+
+    func signIn(presentationAnchor: ASPresentationAnchor) async throws -> OAuthCredentials {
+        signInStarted = true
+        let credentials = try await withCheckedThrowingContinuation { continuation in
+            signInContinuation = continuation
+        }
+        signInFinished = true
+        return credentials
+    }
+
+    func refreshCredentials(_ credentials: OAuthCredentials) async throws -> OAuthCredentials {
+        credentials
+    }
+
+    func cancelSignIn() {
+        cancelCount += 1
+    }
+
+    func resumeSignIn() {
+        guard let credentialsToReturn else { return }
+        signInContinuation?.resume(returning: credentialsToReturn)
+        signInContinuation = nil
+    }
+}
+
+@MainActor
+final class SuspendingTimbreAPIClient: TimbreAPIClienting {
+    var fetchStarted = false
+    var fetchFinished = false
+    private var fetchContinuation: CheckedContinuation<MeUser, Error>?
+
+    func fetchMe(accessToken: String) async throws -> MeUser {
+        fetchStarted = true
+        let user = try await withCheckedThrowingContinuation { continuation in
+            fetchContinuation = continuation
+        }
+        fetchFinished = true
+        return user
+    }
+
+    func resumeFetch(with user: MeUser) {
+        fetchContinuation?.resume(returning: user)
+        fetchContinuation = nil
+    }
+}
+
+@MainActor
 final class AuthenticationControllerTests: XCTestCase {
+    private func makeConfiguration() -> AuthConfiguration {
+        AuthConfiguration(
+            clerkOAuthClientID: "client",
+            authorizationURL: URL(string: "https://example.clerk.accounts.dev/oauth/authorize")!,
+            tokenURL: URL(string: "https://example.clerk.accounts.dev/oauth/token")!,
+            apiBaseURL: URL(string: "https://example.com")!,
+            callbackScheme: "timbre-auth",
+            redirectURI: "timbre-auth://oauth/callback",
+            scopes: AuthConfiguration.defaultScopes
+        )
+    }
+
     func testSignOutClearsCredentialsAndState() async throws {
         let store = InMemoryCredentialStore()
         let service = FakeAuthenticationService()
@@ -234,17 +301,8 @@ final class AuthenticationControllerTests: XCTestCase {
         service.credentialsToReturn = credentials
         api.user = user
 
-        let configuration = AuthConfiguration(
-            clerkOAuthClientID: "client",
-            authorizationURL: URL(string: "https://example.clerk.accounts.dev/oauth/authorize")!,
-            tokenURL: URL(string: "https://example.clerk.accounts.dev/oauth/token")!,
-            apiBaseURL: URL(string: "https://example.com")!,
-            callbackScheme: "timbre-auth",
-            redirectURI: "timbre-auth://oauth/callback",
-            scopes: AuthConfiguration.defaultScopes
-        )
         let controller = AuthenticationController(
-            configuration: configuration,
+            configuration: makeConfiguration(),
             authService: service,
             apiClient: api,
             credentialStore: store
@@ -261,5 +319,104 @@ final class AuthenticationControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .signedOut)
         XCTAssertNil(try store.loadCredentials())
         XCTAssertEqual(service.cancelCount, 2) // once before sign-in, once on sign-out
+    }
+
+    func testSignOutFailureKeepsTheExistingSessionActive() async throws {
+        let store = InMemoryCredentialStore()
+        let service = FakeAuthenticationService()
+        let api = FakeTimbreAPIClient()
+        let user = MeUser(userId: "u1", email: "a@example.com", firstName: "A", lastName: nil)
+        let credentials = OAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(3_600),
+            tokenType: "Bearer",
+            scope: nil
+        )
+        service.credentialsToReturn = credentials
+        api.user = user
+        let controller = AuthenticationController(
+            configuration: makeConfiguration(),
+            authService: service,
+            apiClient: api,
+            credentialStore: store
+        )
+
+        controller.signIn()
+        await waitUntil {
+            if case .signedIn = controller.state { return true }
+            return false
+        }
+
+        store.clearError = NSError(domain: "AuthenticationTests", code: 1)
+        controller.signOut()
+
+        XCTAssertEqual(controller.state, .signedIn(user))
+        XCTAssertNotNil(try store.loadCredentials())
+    }
+
+    func testSignOutInvalidatesAStaleSignInCompletion() async throws {
+        let store = InMemoryCredentialStore()
+        let service = SuspendingAuthenticationService()
+        let api = SuspendingTimbreAPIClient()
+        let user = MeUser(userId: "u1", email: "a@example.com", firstName: "A", lastName: nil)
+        let credentials = OAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(3_600),
+            tokenType: "Bearer",
+            scope: nil
+        )
+        service.credentialsToReturn = credentials
+        let controller = AuthenticationController(
+            configuration: makeConfiguration(),
+            authService: service,
+            apiClient: api,
+            credentialStore: store
+        )
+
+        controller.signIn()
+        await waitUntil { service.signInStarted }
+        service.resumeSignIn()
+        await waitUntil { api.fetchStarted }
+
+        controller.signOut()
+        api.resumeFetch(with: user)
+        await waitUntil { api.fetchFinished }
+
+        XCTAssertEqual(controller.state, .signedOut)
+        XCTAssertNil(try store.loadCredentials())
+    }
+
+    func testCancelSignInInvalidatesAStaleAuthenticationCompletion() async throws {
+        let store = InMemoryCredentialStore()
+        let service = SuspendingAuthenticationService()
+        let api = FakeTimbreAPIClient()
+        let user = MeUser(userId: "u1", email: "a@example.com", firstName: "A", lastName: nil)
+        let credentials = OAuthCredentials(
+            accessToken: "access",
+            refreshToken: "refresh",
+            expiresAt: Date().addingTimeInterval(3_600),
+            tokenType: "Bearer",
+            scope: nil
+        )
+        service.credentialsToReturn = credentials
+        api.user = user
+        let controller = AuthenticationController(
+            configuration: makeConfiguration(),
+            authService: service,
+            apiClient: api,
+            credentialStore: store
+        )
+
+        controller.signIn()
+        await waitUntil { service.signInStarted }
+        controller.cancelSignIn()
+        service.resumeSignIn()
+        await waitUntil { service.signInFinished }
+
+        XCTAssertEqual(controller.state, .signedOut)
+        XCTAssertNil(try store.loadCredentials())
+        XCTAssertEqual(api.fetchCount, 0)
     }
 }

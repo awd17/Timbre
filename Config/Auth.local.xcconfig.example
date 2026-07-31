@@ -6,6 +6,7 @@ CLERK_OAUTH_CLIENT_ID = YOUR_CLERK_OAUTH_CLIENT_ID
 // Keep the slashes separated so the xcconfig parser does not treat `//` as a comment.
 CLERK_AUTHORIZATION_URL = https:/$()/YOUR_INSTANCE.clerk.accounts.dev/oauth/authorize
 CLERK_TOKEN_URL = https:/$()/YOUR_INSTANCE.clerk.accounts.dev/oauth/token
-TIMBRE_API_BASE_URL = https:/$()/YOUR_TIMBRE_WEB_HOST
+TIMBRE_API_BASE_URL[config=Debug] = http:/$()/localhost:3000
+TIMBRE_API_BASE_URL[config=Release] = https:/$()/timbre.website/
 TIMBRE_AUTH_CALLBACK_SCHEME = timbre-auth
 TIMBRE_AUTH_REDIRECT_URI = timbre-auth:/$()/oauth/callback

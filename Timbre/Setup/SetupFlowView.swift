@@ -49,7 +49,7 @@ struct SetupFlowView: View {
                 .transition(.opacity)
                 .padding(.horizontal, 44)
                 .padding(.top, 24)
-                .padding(.bottom, 18)
+                .padding(.bottom, 30)
                 .foregroundStyle(.white)
         }
         .animation(.easeInOut(duration: 0.25), value: coordinator.step)
@@ -99,9 +99,9 @@ struct SetupFlowView: View {
     ) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 0)
-            VStack(spacing: 18) {
+            VStack(spacing: 14) {
                 hero()
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Text(title)
                         .font(.system(size: 27, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
@@ -118,10 +118,10 @@ struct SetupFlowView: View {
                 }
                 content()
             }
-            Spacer(minLength: 18)
+            Spacer(minLength: 24)
             footer()
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func stepScaffold<Hero: View, Footer: View>(
@@ -178,7 +178,7 @@ struct SetupFlowView: View {
             hero: { appIconHero },
             content: {
                 signInContent(for: authState)
-                    .padding(.top, 20)
+                    .padding(.top, 12)
             },
             footer: {
                 signInFooter(for: authState)
@@ -333,7 +333,7 @@ struct SetupFlowView: View {
                     .accessibilityIdentifier("setupShortcutRecordingStatus")
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.top, 22)
+                .padding(.top, 12)
             },
             footer: {
                 Button("Continue") {
@@ -526,7 +526,7 @@ struct SetupFlowView: View {
                 }
                 .frame(maxWidth: 340)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 22)
+                .padding(.top, 12)
             },
             footer: {
                 Button("Continue in Background") {
@@ -559,7 +559,7 @@ struct SetupFlowView: View {
                 }
                 .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.8))
-                .padding(.top, 10)
+                .padding(.top, 6)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(
                     coordinator.shortcutDisplayString.map {

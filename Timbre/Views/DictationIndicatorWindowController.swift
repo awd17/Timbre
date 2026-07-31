@@ -179,18 +179,24 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         localEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
             [weak self] event in
             guard Self.isEscapeKeyDown(event) else { return event }
-            let didCancel = MainActor.assumeIsolated {
-                self?.controller.cancelDictation() != nil
-            }
-            return didCancel ? nil : event
+            self?.cancelFromEscape()
+            // Let the focused control finish handling Escape as well (for example,
+            // the onboarding shortcut recorder), while cancellation runs on the
+            // main actor immediately after this event is observed.
+            return event
         }
 
         globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
             [weak self] event in
             guard Self.isEscapeKeyDown(event) else { return }
-            Task { @MainActor [weak self] in
-                self?.controller.cancelDictation()
-            }
+            self?.cancelFromEscape()
+        }
+    }
+
+    private func cancelFromEscape() {
+        Task { @MainActor [weak self] in
+            guard let self, self.controller.canCancel else { return }
+            self.controller.cancelDictation()
         }
     }
 

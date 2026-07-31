@@ -37,7 +37,7 @@ base file referenced by the Timbre target and optionally includes the local file
 | `CLERK_OAUTH_CLIENT_ID` | Public OAuth client ID (no secret) |
 | `CLERK_AUTHORIZATION_URL` | `authorization_endpoint` from discovery |
 | `CLERK_TOKEN_URL` | `token_endpoint` from discovery |
-| `TIMBRE_API_BASE_URL` | Timbre web origin, e.g. `https://timbre.app` or `http://localhost:3000` |
+| `TIMBRE_API_BASE_URL` | Debug: `http://localhost:3000`; Release: `https://timbre.website/` |
 | `TIMBRE_AUTH_CALLBACK_SCHEME` | `timbre-auth` |
 | `TIMBRE_AUTH_REDIRECT_URI` | `timbre-auth://oauth/callback` |
 
