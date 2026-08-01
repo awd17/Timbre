@@ -72,20 +72,22 @@ final class AssistantController {
     /// Playback attenuation is deliberately scoped to this path so unrelated
     /// microphone activity and non-hotkey diagnostic flows cannot trigger it.
     @discardableResult
-    func beginDictationFromShortcut() -> Task<Void, Never>? {
-        beginDictation(adjustsPlayback: true)
+    func beginDictationFromShortcut(
+        requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) -> Task<Void, Never>? {
+        beginDictation(adjustsPlayback: true, requestedAt: requestedAt)
     }
 
     private func beginDictation(
-        adjustsPlayback: Bool
+        adjustsPlayback: Bool,
+        requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) -> Task<Void, Never>? {
         guard canStart else { return nil }
 
-        let startedAt = DispatchTime.now().uptimeNanoseconds
         let session = DictationSessionContext(target: targetProvider.captureTarget())
         activeSession = session
         playbackSessionID = adjustsPlayback ? session.id : nil
-        startRequestedAt = startedAt
+        startRequestedAt = requestedAt
         stopRequestedAt = nil
         audioLevel = 0
         sessionState = .preparing
@@ -173,11 +175,13 @@ final class AssistantController {
         (transcription as? TerminationHandling)?.shutdownForTermination()
     }
 
-    func stopDictation() async {
+    func stopDictation(
+        requestedAt: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) async {
         guard case .listening(let currentTranscript) = sessionState else { return }
         guard let session = activeSession else { return }
 
-        stopRequestedAt = DispatchTime.now().uptimeNanoseconds
+        stopRequestedAt = requestedAt
         audioLevel = 0
         endPlayback(for: session)
         sessionState = .finishing(transcript: currentTranscript)

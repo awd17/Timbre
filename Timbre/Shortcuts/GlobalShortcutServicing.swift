@@ -1,5 +1,13 @@
 import Foundation
 
+struct GlobalShortcutInvocation: Sendable {
+    let requestedAt: UInt64
+
+    static func now() -> Self {
+        Self(requestedAt: DispatchTime.now().uptimeNanoseconds)
+    }
+}
+
 /// Thin boundary around a global hotkey backend (KeyboardShortcuts in production).
 @MainActor
 protocol GlobalShortcutServicing: AnyObject {
@@ -10,7 +18,7 @@ protocol GlobalShortcutServicing: AnyObject {
     func stop()
 
     /// Assign the action invoked when the shortcut fires. Call before `start()`.
-    func setHandler(_ handler: @escaping () -> Void)
+    func setHandler(_ handler: @escaping (GlobalShortcutInvocation) -> Void)
 
     /// Best-effort observation after start — not a cross-app conflict oracle.
     var isListening: Bool { get }

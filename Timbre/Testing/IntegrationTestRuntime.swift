@@ -170,6 +170,11 @@ final class IntegrationTestProbe {
         switch event {
         case .startToPreparing(let milliseconds):
             snapshot.lastStartToPreparingMilliseconds = milliseconds
+            // Timing values describe one session. Clear downstream milestones
+            // so a relaunch or restart cannot mistake an earlier session for
+            // the current one reaching listening or completion.
+            snapshot.lastStartToListeningMilliseconds = nil
+            snapshot.lastStopToCompletionMilliseconds = nil
         case .startToListening(let milliseconds):
             snapshot.lastStartToListeningMilliseconds = milliseconds
         case .stopToCompletion(let milliseconds):

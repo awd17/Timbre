@@ -7,7 +7,7 @@ import KeyboardShortcuts
 @MainActor
 final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
     private let name: KeyboardShortcuts.Name
-    private var handler: (() -> Void)?
+    private var handler: ((GlobalShortcutInvocation) -> Void)?
     private var didStart = false
     #if DEBUG
     private var pendingIntegrationBurst: (
@@ -33,17 +33,18 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
         KeyboardShortcuts.removeHandler(for: name)
 
         KeyboardShortcuts.onKeyUp(for: name) { [weak self] in
+            let invocation = GlobalShortcutInvocation.now()
             guard let self else { return }
             if Thread.isMainThread {
                 // Carbon delivers app event-handler callbacks on the main
                 // thread. Run the hotkey action in this turn instead of
                 // scheduling an avoidable actor hop.
                 MainActor.assumeIsolated {
-                    self.handleKeyUp()
+                    self.handleKeyUp(invocation)
                 }
             } else {
                 Task { @MainActor [weak self] in
-                    self?.handleKeyUp()
+                    self?.handleKeyUp(invocation)
                 }
             }
         }
@@ -66,18 +67,18 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
         TimbreLog.line("Timbre shortcut: stopped")
     }
 
-    func setHandler(_ handler: @escaping () -> Void) {
+    func setHandler(_ handler: @escaping (GlobalShortcutInvocation) -> Void) {
         self.handler = handler
     }
 
-    private func handleKeyUp() {
-        handler?()
+    private func handleKeyUp(_ invocation: GlobalShortcutInvocation) {
+        handler?(invocation)
 
         #if DEBUG
         guard let burst = pendingIntegrationBurst else { return }
         pendingIntegrationBurst = nil
         for _ in 0..<burst.extraInvocations {
-            handler?()
+            handler?(.now())
             burst.didInvoke()
         }
         #endif
@@ -96,7 +97,7 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
     }
 
     func invokeKeyUpForUnitTesting() {
-        handleKeyUp()
+        handleKeyUp(.now())
     }
     #endif
 }

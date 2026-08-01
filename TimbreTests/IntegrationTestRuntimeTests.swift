@@ -87,6 +87,27 @@ final class IntegrationTestProbeTests: XCTestCase {
         XCTAssertEqual(second.snapshot.lastDeliveryResult, "pasteEventPosted")
     }
 
+    func testNewSessionClearsEarlierTimingMilestones() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TimbreProbeTimingTests-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let first = IntegrationTestProbe(url: url, reset: true)
+        first.recordPerformance(.startToPreparing(milliseconds: 4))
+        first.recordPerformance(.startToListening(milliseconds: 25))
+        first.recordPerformance(.stopToCompletion(milliseconds: 40))
+
+        first.recordPerformance(.startToPreparing(milliseconds: 6))
+
+        XCTAssertEqual(first.snapshot.lastStartToPreparingMilliseconds, 6)
+        XCTAssertNil(first.snapshot.lastStartToListeningMilliseconds)
+        XCTAssertNil(first.snapshot.lastStopToCompletionMilliseconds)
+
+        let relaunched = IntegrationTestProbe(url: url, reset: false)
+        XCTAssertNil(relaunched.snapshot.lastStartToListeningMilliseconds)
+        XCTAssertNil(relaunched.snapshot.lastStopToCompletionMilliseconds)
+    }
+
     func testProbeRecordsEveryDeliveryBoundaryAndFailedPostText() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("TimbreProbeBoundaryTests-\(UUID().uuidString).json")
@@ -357,7 +378,7 @@ final class IntegrationShortcutInjectionTests: XCTestCase {
         )
         var handlerInvocations = 0
         var burstInvocations = 0
-        service.setHandler {
+        service.setHandler { _ in
             handlerInvocations += 1
         }
         service.armIntegrationTestBurst(extraInvocations: 3) {

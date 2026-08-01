@@ -293,8 +293,10 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         // rather than rendering one frame of the default hidden state.
         viewModel.presentation = presentation
         let panel = makePanelIfNeeded()
-        if !didWarmPanel {
+        if !panel.isVisible {
             restoreOrClampPanelPosition()
+        }
+        if !didWarmPanel {
             panel.contentView?.layoutSubtreeIfNeeded()
             panel.contentView?.displayIfNeeded()
             didWarmPanel = true
