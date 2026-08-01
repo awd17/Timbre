@@ -126,6 +126,49 @@ final class TimbreUITests: XCTestCase {
         XCTAssertLessThan(stopToCompletion, 1_000)
     }
 
+    @MainActor
+    func testColdStartShowsLoadingState() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "coldPerformance",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["setupFlowRoot"].waitForExistence(timeout: 1),
+            hierarchy(app, "Cold performance profile should launch ready")
+        )
+        let initial = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == 0 && $0.modelState == "loaded"
+        }
+        let armed = try invokeIntegrationShortcut(after: initial)
+
+        let indicator = app.descendants(matching: .any)["dictationIndicator"]
+        XCTAssertTrue(
+            indicator.waitForExistence(timeout: 1),
+            hierarchy(app, "Cold start should expose the loading indicator")
+        )
+        XCTAssertEqual(indicator.label, "Preparing dictation")
+        let preparingWidth = indicator.frame.width
+        XCTAssertLessThan(preparingWidth, 60)
+
+        let listening = try waitForProbe(backgroundProbeURL, timeout: 8) {
+            $0.sessionStarts == initial.sessionStarts + 1
+                && $0.lastStartToListeningMilliseconds != nil
+        }
+        let startToListening = try XCTUnwrap(listening.lastStartToListeningMilliseconds)
+        XCTAssertTrue(waitForLabel(indicator, "Listening", timeout: 2))
+        XCTAssertGreaterThan(indicator.frame.width, preparingWidth)
+        print(String(format: "Timbre cold-start latency: start-to-listening=%.1fms", startToListening))
+        XCTAssertLessThan(startToListening, 6_000)
+
+        _ = try invokeIntegrationShortcut(after: armed)
+        _ = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStops == 1
+        }
+    }
+
     // MARK: - Major phases
 
     @MainActor
@@ -401,6 +444,7 @@ final class TimbreUITests: XCTestCase {
         pressGlobalHotkey(in: textEdit)
         _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
             $0.sessionStarts == relaunched.sessionStarts + 1
+                && $0.lastStartToListeningMilliseconds != nil
         }
         pressGlobalHotkey(in: textEdit)
         let readyUse = try waitForProbe(backgroundProbeURL, timeout: 5) {
@@ -534,6 +578,7 @@ final class TimbreUITests: XCTestCase {
         // is always authenticated, so the way forward is the Continue button.
         let welcome = app.buttons["setupSignInContinueButton"]
         XCTAssertTrue(welcome.waitForExistence(timeout: 10), hierarchy(app, "Missing combined welcome + sign-in"))
+        app.activate()
         welcome.click()
 
         let shortcutContinue = app.buttons["setupShortcutContinueButton"]
@@ -554,6 +599,7 @@ final class TimbreUITests: XCTestCase {
     ) throws {
         let setHotkey = app.buttons["setupShortcutSetButton"]
         XCTAssertTrue(setHotkey.waitForExistence(timeout: 5), hierarchy(app, "Missing Set hotkey"))
+        app.activate()
         setHotkey.click()
         XCTAssertTrue(
             app.descendants(matching: .any)["setupShortcutRecordingStatus"]
@@ -702,6 +748,21 @@ final class TimbreUITests: XCTestCase {
         }
     }
 
+    private func invokeIntegrationShortcut(after snapshot: ProbeSnapshot) throws -> ProbeSnapshot {
+        let command = ShortcutBurstCommand(
+            generation: snapshot.shortcutBurstsArmed + 1,
+            extraInvocations: 0,
+            invoke: true
+        )
+        let data = try JSONEncoder().encode(command)
+        let commandURL = backgroundProbeURL.deletingPathExtension()
+            .appendingPathExtension("shortcut-burst.json")
+        try data.write(to: commandURL, options: .atomic)
+        return try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.shortcutBurstsArmed == snapshot.shortcutBurstsArmed + 1
+        }
+    }
+
     /// Uses XCTest's event channel so a clean test machine does not need to grant
     /// Accessibility or Input Monitoring access to the XCTest runner. The event
     /// still enters through macOS and exercises the registered Carbon shortcut.
@@ -735,4 +796,11 @@ private struct ProbeSnapshot: Codable {
 private struct ShortcutBurstCommand: Codable {
     let generation: Int
     let extraInvocations: Int
+    let invoke: Bool?
+
+    init(generation: Int, extraInvocations: Int, invoke: Bool? = nil) {
+        self.generation = generation
+        self.extraInvocations = extraInvocations
+        self.invoke = invoke
+    }
 }

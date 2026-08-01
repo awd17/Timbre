@@ -91,7 +91,7 @@ final class AssistantController {
         sessionState = .preparing
         recordStartToPreparingIfNeeded()
 
-        return Task { [weak self] in
+        return Task(priority: .userInitiated) { [weak self] in
             await self?.prepareAndStart(session)
         }
     }
@@ -107,6 +107,11 @@ final class AssistantController {
     }
 
     private func prepareAndStart(_ session: DictationSessionContext) async {
+        // The preparing state synchronously reveals the indicator panel. Give
+        // AppKit one scheduling opportunity to commit that first frame before
+        // first-use model and Core Audio work begins on the main actor.
+        await Task.yield()
+
         // The transcription service owns one shared microphone session. A
         // replacement session must not enter it until every earlier
         // cancellation has finished tearing down that shared state.

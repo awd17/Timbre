@@ -346,6 +346,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         dictationIndicatorCoordinator.start()
         authenticationController.start()
+        // Begin retained model loading as soon as launch readiness is known.
+        // This gives an immediate first dictation the best chance of joining a
+        // completed (or further-progressed) prewarm flight.
+        prewarmCoordinator?.evaluate(source: .launchReadiness)
 
         #if DEBUG
         presentDebugWindowIfNeeded()
@@ -364,8 +368,6 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
             presentSetupWindow()
         }
-
-        prewarmCoordinator?.evaluate(source: .launchReadiness)
 
         Task { @MainActor [weak self] in
             // LaunchServices (including Xcode Run) can send a reopen while it

@@ -92,7 +92,7 @@ final class ParakeetPrewarmCoordinator {
         TimbreLog.line("Timbre prewarm: requested (\(source.rawValue)).")
 
         // Unstructured load task: cancelling the coordinator await must not cancel this work.
-        let prewarmTask = Task { @MainActor [modelManager] in
+        let prewarmTask = Task(priority: .userInitiated) { @MainActor [modelManager] in
             try await modelManager.loadInstalledAndRetain()
         }
 

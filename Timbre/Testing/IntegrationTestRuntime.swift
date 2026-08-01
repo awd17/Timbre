@@ -15,6 +15,7 @@ enum IntegrationTestScenario: String, CaseIterable {
     case pasteboardRace
     case eventPostFailure
     case performance
+    case coldPerformance
     case cleanup
 }
 
@@ -96,6 +97,7 @@ struct IntegrationProbeSnapshot: Codable, Equatable {
 private struct IntegrationShortcutBurstCommand: Codable {
     let generation: Int
     let extraInvocations: Int
+    let invoke: Bool?
 }
 
 @MainActor
@@ -297,12 +299,15 @@ final class IntegrationTestRuntime {
                  .pasteboardRace,
                  .eventPostFailure,
                  .performance,
+                 .coldPerformance,
                  .cleanup:
                 break
             }
         }
 
-        if configuration.shouldReset, configuration.scenario == .performance {
+        if configuration.shouldReset,
+           configuration.scenario == .performance || configuration.scenario == .coldPerformance
+        {
             defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedWelcomeKey)
             defaults.set(true, forKey: UserDefaultsOnboardingPreferences.dismissedReadyKey)
             defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedShortcutOnboardingKey)
@@ -388,13 +393,18 @@ final class IntegrationTestRuntime {
     }
 
     private func armShortcutBurst(_ command: IntegrationShortcutBurstCommand) {
-        guard command.extraInvocations > 0 else { return }
-        shortcutService.armIntegrationTestBurst(
-            extraInvocations: command.extraInvocations
-        ) { [weak probe] in
-            probe?.recordShortcutBurstInvocation()
+        guard command.extraInvocations > 0 || command.invoke == true else { return }
+        if command.extraInvocations > 0 {
+            shortcutService.armIntegrationTestBurst(
+                extraInvocations: command.extraInvocations
+            ) { [weak probe] in
+                probe?.recordShortcutBurstInvocation()
+            }
         }
         probe.recordShortcutBurstArmed()
+        if command.invoke == true {
+            shortcutService.invokeKeyUpForUnitTesting()
+        }
     }
 
     func cleanupPersistentStateIfRequested() {
@@ -527,6 +537,11 @@ final class PersistentIntegrationModelManager: ParakeetModelManaging {
             probe.setModelState(state)
             throw ParakeetModelError.modelNotInstalled
         }
+        if scenario == .coldPerformance {
+            state = .loading
+            probe.setModelState(state)
+            try await Task.sleep(for: .milliseconds(700))
+        }
         state = .loaded
         probe.setModelState(state)
     }
@@ -658,10 +673,16 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
         accessibility: IntegrationAccessibilityPermission,
         probe: IntegrationTestProbe
     ) {
-        _ = scenario
         _ = accessibility
         self.probe = probe
-        prepareDelay = scenario == .performance ? .milliseconds(20) : .milliseconds(300)
+        switch scenario {
+        case .performance:
+            prepareDelay = .milliseconds(20)
+        case .coldPerformance:
+            prepareDelay = .seconds(5)
+        default:
+            prepareDelay = .milliseconds(300)
+        }
         stopDelay = scenario == .performance ? .milliseconds(20) : .milliseconds(300)
     }
 

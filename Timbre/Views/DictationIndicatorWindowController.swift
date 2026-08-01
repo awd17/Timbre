@@ -115,9 +115,9 @@ final class DictationIndicatorPlacementStore {
 
 @MainActor
 final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
-    private static let panelSize = NSSize(width: 84, height: 40)
+    private static let panelSize = NSSize(width: 80, height: 38)
     // Keep the preparing state legible without making a warm start feel delayed.
-    private static let minimumPreparingNanoseconds: UInt64 = 100_000_000
+    private static let minimumPreparingNanoseconds: UInt64 = 80_000_000
 
     private let controller: AssistantController
     private let placementStore: DictationIndicatorPlacementStore
@@ -245,8 +245,11 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
             hide()
         case .preparing:
             isSessionVisible = true
-            preparingPresentedAt = DispatchTime.now().uptimeNanoseconds
             present(presentation)
+            // Measure the minimum dwell from the moment the indicator has
+            // actually been laid out and ordered onscreen. Cold panel creation
+            // should not consume the preparing state's visible time.
+            preparingPresentedAt = DispatchTime.now().uptimeNanoseconds
         case .listening:
             isSessionVisible = true
             presentListeningAfterPreparingDwell()
@@ -297,6 +300,13 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
             didWarmPanel = true
         }
         panel.orderFrontRegardless()
+        if presentation == .preparing {
+            // The hidden panel is pre-rendered during launch. Force SwiftUI's
+            // newly selected preparing content into that existing surface now,
+            // before first-use model work can occupy the main actor.
+            panel.contentView?.layoutSubtreeIfNeeded()
+            panel.contentView?.displayIfNeeded()
+        }
         announce(presentation.accessibilityLabel)
     }
 
