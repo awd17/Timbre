@@ -37,7 +37,7 @@ base file referenced by the Timbre target and optionally includes the local file
 | `CLERK_OAUTH_CLIENT_ID` | Public OAuth client ID (no secret) |
 | `CLERK_AUTHORIZATION_URL` | `authorization_endpoint` from discovery |
 | `CLERK_TOKEN_URL` | `token_endpoint` from discovery |
-| `TIMBRE_API_BASE_URL` | Debug: `http://localhost:3000`; Release: `https://timbre.website/` |
+| `TIMBRE_API_BASE_URL` | Debug: `http://localhost:3000`; Release: `https://www.timbre.website/` |
 | `TIMBRE_AUTH_CALLBACK_SCHEME` | `timbre-auth` |
 | `TIMBRE_AUTH_REDIRECT_URI` | `timbre-auth://oauth/callback` |
 
@@ -65,6 +65,11 @@ These are substituted into `Timbre/Info.plist` at build time.
 
 Both Debug and Release Timbre targets use `Config/Auth.xcconfig` as their base
 configuration.
+
+The release API URL intentionally uses the canonical `www` host. The apex
+`https://timbre.website/` currently redirects to that host; `URLSession` does
+not forward an `Authorization` header across that cross-host redirect, so the
+apex URL makes every native request look signed out.
 
 ## UI entry points
 
