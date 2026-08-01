@@ -69,16 +69,16 @@ struct DictationIndicatorView: View {
     private let barWeights: [CGFloat] = [0.34, 0.58, 0.82, 1, 0.82, 0.58, 0.34]
 
     var body: some View {
-        Group {
-            if model.presentation == .processing && !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1 / 30)) { context in
-                    content(at: context.date.timeIntervalSinceReferenceDate)
-                }
-            } else {
-                content(at: 0)
-            }
+        TimelineView(
+            .animation(minimumInterval: 1 / 30, paused: !usesTimeline)
+        ) { context in
+            content(
+                at: usesTimeline
+                    ? context.date.timeIntervalSinceReferenceDate
+                    : 0
+            )
         }
-        .frame(width: 84, height: 40)
+        .frame(width: indicatorWidth, height: 38)
         .background(
             Color.black.opacity(0.78),
             in: Capsule(style: .continuous)
@@ -89,6 +89,10 @@ struct DictationIndicatorView: View {
         }
         .contentShape(Capsule(style: .continuous))
         .preferredColorScheme(.dark)
+        .animation(
+            indicatorAnimation,
+            value: model.presentation
+        )
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("dictationIndicator")
         .accessibilityLabel(model.presentation.accessibilityLabel)
@@ -110,21 +114,46 @@ struct DictationIndicatorView: View {
         }
     }
 
+    private var usesTimeline: Bool {
+        guard !reduceMotion else { return false }
+        return model.presentation == .preparing || model.presentation == .processing
+    }
+
+    private var indicatorWidth: CGFloat {
+        switch model.presentation {
+        case .hidden, .preparing:
+            return 38
+        default:
+            return 80
+        }
+    }
+
+    private var indicatorAnimation: Animation? {
+        guard !reduceMotion, model.presentation == .listening else { return nil }
+        return .easeInOut(duration: 0.15)
+    }
+
     private func waveform(at time: TimeInterval) -> some View {
-        HStack(alignment: .center, spacing: 3) {
+        ZStack {
             ForEach(barWeights.indices, id: \.self) { index in
                 Capsule(style: .continuous)
                     .fill(waveformColor)
-                    .frame(width: 5, height: barHeight(index: index, time: time))
+                    .frame(
+                        width: barWidth,
+                        height: barLength(index: index, time: time)
+                    )
+                    .offset(barOffset(index: index))
+                    .opacity(barOpacity(index: index, time: time))
             }
         }
         .frame(width: 53, height: 28)
+        .accessibilityHidden(true)
     }
 
     private var waveformColor: Color {
         switch model.presentation {
         case .preparing:
-            return Color(white: 0.72).opacity(0.9)
+            return Color.white.opacity(0.9)
         case .listening:
             return Color(red: 0.78, green: 0.91, blue: 1)
         case .processing:
@@ -134,15 +163,44 @@ struct DictationIndicatorView: View {
         }
     }
 
+    private var barWidth: CGFloat {
+        model.presentation == .preparing ? 2.5 : 5
+    }
+
+    private func barLength(index: Int, time: TimeInterval) -> CGFloat {
+        guard model.presentation == .preparing else {
+            return barHeight(index: index, time: time)
+        }
+
+        let pulse = preparingPulse(index: index, time: time)
+        return 4 + barWeights[index] * 4 + pulse * 3
+    }
+
+    private func barOffset(index: Int) -> CGSize {
+        if model.presentation == .preparing {
+            return CGSize(width: CGFloat(index - 3) * 3.1, height: 0)
+        }
+
+        return CGSize(width: CGFloat(index - 3) * 8, height: 0)
+    }
+
+    private func barOpacity(index: Int, time: TimeInterval) -> Double {
+        guard model.presentation == .preparing else { return 1 }
+        let pulse = preparingPulse(index: index, time: time)
+        return 0.55 + Double(pulse) * 0.35
+    }
+
+    private func preparingPulse(index: Int, time: TimeInterval) -> CGFloat {
+        guard !reduceMotion else { return 0.5 }
+        return CGFloat((sin(time * 7.5 - Double(index) * 0.8) + 1) / 2)
+    }
+
     private func barHeight(index: Int, time: TimeInterval) -> CGFloat {
         let weight = barWeights[index]
         switch model.presentation {
-        case .preparing:
-            return 5 + weight * 5
         case .listening:
             let level = CGFloat(min(max(controller.audioLevel, 0), 1))
-            let responsiveLevel = sqrt(level)
-            return 4 + weight * (5 + responsiveLevel * 20)
+            return 4 + weight * (5 + level * 20)
         case .processing:
             guard !reduceMotion else { return 7 + weight * 8 }
             let distance = abs(Double(index) - 3)

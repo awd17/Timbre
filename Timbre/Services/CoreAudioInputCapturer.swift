@@ -374,6 +374,7 @@ final class CoreAudioInputCapturer {
     private final class CallbackState: @unchecked Sendable {
         let audioUnit: AudioUnit
         let asbd: AudioStreamBasicDescription
+        let format: AVAudioFormat?
         let renderBuffer: UnsafeMutablePointer<AudioBufferList>
         let onBuffer: @Sendable (AVAudioPCMBuffer) -> Void
         let onAudioLevel: @MainActor (Float) -> Void
@@ -388,6 +389,12 @@ final class CoreAudioInputCapturer {
         ) {
             self.audioUnit = audioUnit
             self.asbd = asbd
+            self.format = AVAudioFormat(
+                commonFormat: .pcmFormatFloat32,
+                sampleRate: asbd.mSampleRate,
+                channels: AVAudioChannelCount(max(asbd.mChannelsPerFrame, 1)),
+                interleaved: false
+            )
             self.renderBuffer = renderBuffer
             self.onBuffer = onBuffer
             self.onAudioLevel = onAudioLevel
@@ -416,14 +423,8 @@ final class CoreAudioInputCapturer {
             )
             guard status == noErr else { return status }
 
-            guard
-                let format = AVAudioFormat(
-                    commonFormat: .pcmFormatFloat32,
-                    sampleRate: asbd.mSampleRate,
-                    channels: AVAudioChannelCount(channels),
-                    interleaved: false
-                ),
-                let buffer = AVAudioPCMBuffer(
+            guard let format,
+                  let buffer = AVAudioPCMBuffer(
                     pcmFormat: format,
                     frameCapacity: inNumberFrames
                 ),

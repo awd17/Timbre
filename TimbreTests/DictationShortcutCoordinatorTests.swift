@@ -87,6 +87,56 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
         XCTAssertEqual(clipboard.lastCopied, "hello")
     }
 
+    func testPerformanceTimingIncludesShortcutDispatchDelay() async throws {
+        let fake = FakeGlobalShortcutService()
+        let mock = MockTranscriptionService(
+            behavior: .success(final: "hello", partials: []),
+            partialDelayNanoseconds: 0
+        )
+        var startToPreparing: Double?
+        var stopToCompletion: Double?
+        let controller = AssistantController(
+            transcription: mock,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            performanceReporter: { event in
+                switch event {
+                case .startToPreparing(let milliseconds):
+                    startToPreparing = milliseconds
+                case .stopToCompletion(let milliseconds):
+                    stopToCompletion = milliseconds
+                case .startToListening:
+                    break
+                }
+            }
+        )
+        let coordinator = DictationShortcutCoordinator(
+            controller: controller,
+            setupCoordinator: nil,
+            shortcutService: fake
+        )
+        coordinator.start()
+
+        let startRequestedAt = DispatchTime.now().uptimeNanoseconds - 50_000_000
+        fake.fire(requestedAt: startRequestedAt)
+
+        XCTAssertGreaterThan(try XCTUnwrap(startToPreparing), 40)
+        await waitUntil(controller) {
+            if case .listening = $0.sessionState { return true }
+            return false
+        }
+
+        let stopRequestedAt = DispatchTime.now().uptimeNanoseconds - 50_000_000
+        fake.fire(requestedAt: stopRequestedAt)
+        await waitUntil(controller) {
+            if case .completed = $0.sessionState { return true }
+            return false
+        }
+
+        XCTAssertGreaterThan(try XCTUnwrap(stopToCompletion), 40)
+    }
+
     func testRapidPressDuringPreparingDoesNotStartSecondSession() async {
         let fake = FakeGlobalShortcutService()
         let mock = MockTranscriptionService(

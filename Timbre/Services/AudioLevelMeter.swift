@@ -5,18 +5,30 @@ import Foundation
 /// Converts microphone PCM buffers into a throttled, smoothed 0...1 voice level.
 ///
 /// The meter retains no audio. Its small lock protects smoothing state because
-/// AVAudioEngine invokes taps outside the main actor.
+/// the realtime audio callback runs outside the main actor.
 final class AudioLevelMeter: @unchecked Sendable {
-    static let floorDecibels: Float = -60
-    static let ceilingDecibels: Float = -20
+    /// Keep ordinary speech below the top of the meter even when input gain is high.
+    static let floorDecibels: Float = -54
+    static let ceilingDecibels: Float = -6
+    static let noiseGateDecibels: Float = -42
+    static let noiseGateWidthDecibels: Float = 6
 
     private let lock = NSLock()
     private let minimumPublishInterval: TimeInterval
+    private let attackTimeConstant: TimeInterval
+    private let releaseTimeConstant: TimeInterval
     private var smoothedLevel: Float = 0
-    private var lastPublishTime: TimeInterval = 0
+    private var lastSampleTime: TimeInterval?
+    private var lastPublishTime: TimeInterval?
 
-    init(maximumUpdatesPerSecond: Double = 30) {
+    init(
+        maximumUpdatesPerSecond: Double = 24,
+        attackTimeConstant: TimeInterval = 0.12,
+        releaseTimeConstant: TimeInterval = 0.28
+    ) {
         minimumPublishInterval = 1 / max(maximumUpdatesPerSecond, 1)
+        self.attackTimeConstant = max(attackTimeConstant, 0.001)
+        self.releaseTimeConstant = max(releaseTimeConstant, 0.001)
     }
 
     func consume(
@@ -49,10 +61,23 @@ final class AudioLevelMeter: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
-        let coefficient: Float = target > smoothedLevel ? 0.72 : 0.24
+        let delta = max(time - (lastSampleTime ?? time), 0)
+        let coefficient: Float
+        if lastSampleTime == nil {
+            coefficient = 1
+        } else {
+            let timeConstant = target > smoothedLevel
+                ? attackTimeConstant
+                : releaseTimeConstant
+            coefficient = Float(1 - exp(-delta / timeConstant))
+        }
         smoothedLevel += (target - smoothedLevel) * coefficient
+        lastSampleTime = time
 
-        guard lastPublishTime == 0 || time - lastPublishTime >= minimumPublishInterval else {
+        guard
+            lastPublishTime == nil
+                || time - (lastPublishTime ?? time) >= minimumPublishInterval
+        else {
             return nil
         }
         lastPublishTime = time
@@ -64,6 +89,10 @@ final class AudioLevelMeter: @unchecked Sendable {
         let decibels = 20 * log10(rms)
         let normalized =
             (decibels - floorDecibels) / (ceilingDecibels - floorDecibels)
-        return min(max(normalized, 0), 1)
+        let gate = (decibels - noiseGateDecibels) / noiseGateWidthDecibels
+        let softGate = min(max(gate, 0), 1)
+        // A squared knee makes low-level room noise effectively disappear while
+        // leaving normal speech responsive once it clears the gate.
+        return min(max(normalized * softGate * softGate, 0), 1)
     }
 }

@@ -32,8 +32,8 @@ final class DictationShortcutCoordinator {
     func start() {
         guard !didStart else { return }
 
-        shortcutService.setHandler { [weak self] in
-            self?.handlePress()
+        shortcutService.setHandler { [weak self] invocation in
+            self?.handlePress(invocation: invocation)
         }
         shortcutService.start()
         didStart = true
@@ -46,7 +46,7 @@ final class DictationShortcutCoordinator {
     }
 
     /// Invoked by the shortcut service (and unit tests) on each press.
-    func handlePress() {
+    func handlePress(invocation: GlobalShortcutInvocation = .now()) {
         let setup = DictationShortcutSetupContext.from(setupCoordinator)
         let action = DictationShortcutPolicy.resolve(
             session: controller.sessionState,
@@ -55,9 +55,9 @@ final class DictationShortcutCoordinator {
 
         switch action {
         case .start:
-            controller.beginDictationFromShortcut()
+            controller.beginDictationFromShortcut(requestedAt: invocation.requestedAt)
         case .stop:
-            Task { await controller.stopDictation() }
+            Task { await controller.stopDictation(requestedAt: invocation.requestedAt) }
         case .presentSetup:
             presentSetup()
         case .none:

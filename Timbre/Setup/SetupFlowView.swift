@@ -7,6 +7,7 @@ struct SetupFlowView: View {
     var shortcutRecorderName: KeyboardShortcuts.Name = .toggleDictation
     var onContinueInBackground: (() -> Void)?
     var onDone: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isRecordingShortcut = false
 
     var body: some View {
@@ -46,13 +47,16 @@ struct SetupFlowView: View {
 
             stepContent
                 .id(coordinator.step)
-                .transition(.opacity)
+                .transition(reduceMotion ? .identity : .opacity)
                 .padding(.horizontal, 44)
                 .padding(.top, 24)
                 .padding(.bottom, 30)
                 .foregroundStyle(.white)
         }
-        .animation(.easeInOut(duration: 0.25), value: coordinator.step)
+        .animation(
+            reduceMotion ? nil : .easeInOut(duration: 0.18),
+            value: coordinator.step
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .ignoresSafeArea()
@@ -600,6 +604,7 @@ struct SetupFlowView: View {
 
 private struct OnboardingPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -612,11 +617,21 @@ private struct OnboardingPrimaryButtonStyle: ButtonStyle {
                     .fill(isEnabled ? Color.white : Color.white.opacity(0.14))
             )
             .opacity(configuration.isPressed && isEnabled ? 0.75 : 1)
-            .animation(.easeInOut(duration: 0.15), value: isEnabled)
+            .scaleEffect(configuration.isPressed && isEnabled ? 0.985 : 1)
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: 0.15),
+                value: isEnabled
+            )
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.1),
+                value: configuration.isPressed
+            )
     }
 }
 
 private struct OnboardingSecondaryButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
@@ -626,6 +641,11 @@ private struct OnboardingSecondaryButtonStyle: ButtonStyle {
             .background(Capsule(style: .continuous).fill(.white.opacity(0.12)))
             .overlay(Capsule(style: .continuous).strokeBorder(.white.opacity(0.16), lineWidth: 1))
             .opacity(configuration.isPressed ? 0.65 : 1)
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(
+                reduceMotion ? nil : .easeOut(duration: 0.1),
+                value: configuration.isPressed
+            )
     }
 }
 

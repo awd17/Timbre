@@ -14,6 +14,8 @@ enum IntegrationTestScenario: String, CaseIterable {
     case secureInput
     case pasteboardRace
     case eventPostFailure
+    case performance
+    case coldPerformance
     case cleanup
 }
 
@@ -87,11 +89,15 @@ struct IntegrationProbeSnapshot: Codable, Equatable {
     var successfulPastes = 0
     var lastPasteText: String?
     var lastDeliveryResult: String?
+    var lastStartToPreparingMilliseconds: Double?
+    var lastStartToListeningMilliseconds: Double?
+    var lastStopToCompletionMilliseconds: Double?
 }
 
 private struct IntegrationShortcutBurstCommand: Codable {
     let generation: Int
     let extraInvocations: Int
+    let invoke: Bool?
 }
 
 @MainActor
@@ -157,6 +163,23 @@ final class IntegrationTestProbe {
 
     func recordDeliveryResult(_ result: TranscriptDeliveryResult) {
         snapshot.lastDeliveryResult = result.integrationName
+        persist()
+    }
+
+    func recordPerformance(_ event: DictationPerformanceEvent) {
+        switch event {
+        case .startToPreparing(let milliseconds):
+            snapshot.lastStartToPreparingMilliseconds = milliseconds
+            // Timing values describe one session. Clear downstream milestones
+            // so a relaunch or restart cannot mistake an earlier session for
+            // the current one reaching listening or completion.
+            snapshot.lastStartToListeningMilliseconds = nil
+            snapshot.lastStopToCompletionMilliseconds = nil
+        case .startToListening(let milliseconds):
+            snapshot.lastStartToListeningMilliseconds = milliseconds
+        case .stopToCompletion(let milliseconds):
+            snapshot.lastStopToCompletionMilliseconds = milliseconds
+        }
         persist()
     }
 
@@ -280,9 +303,27 @@ final class IntegrationTestRuntime {
                  .secureInput,
                  .pasteboardRace,
                  .eventPostFailure,
+                 .performance,
+                 .coldPerformance,
                  .cleanup:
                 break
             }
+        }
+
+        if configuration.shouldReset,
+           configuration.scenario == .performance || configuration.scenario == .coldPerformance
+        {
+            defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedWelcomeKey)
+            defaults.set(true, forKey: UserDefaultsOnboardingPreferences.dismissedReadyKey)
+            defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedShortcutOnboardingKey)
+            defaults.set(true, forKey: Self.modelInstalledKey)
+            defaults.set(true, forKey: Self.microphoneGrantedKey)
+            defaults.set(true, forKey: Self.accessibilityTrustedKey)
+            defaults.set(true, forKey: Self.accessibilityOfferedKey)
+            KeyboardShortcuts.setShortcut(
+                KeyboardShortcuts.Shortcut(.k, modifiers: [.control, .shift]),
+                for: .integrationTestToggleDictation
+            )
         }
 
         if configuration.scenario == .microphoneRevoked {
@@ -357,13 +398,18 @@ final class IntegrationTestRuntime {
     }
 
     private func armShortcutBurst(_ command: IntegrationShortcutBurstCommand) {
-        guard command.extraInvocations > 0 else { return }
-        shortcutService.armIntegrationTestBurst(
-            extraInvocations: command.extraInvocations
-        ) { [weak probe] in
-            probe?.recordShortcutBurstInvocation()
+        guard command.extraInvocations > 0 || command.invoke == true else { return }
+        if command.extraInvocations > 0 {
+            shortcutService.armIntegrationTestBurst(
+                extraInvocations: command.extraInvocations
+            ) { [weak probe] in
+                probe?.recordShortcutBurstInvocation()
+            }
         }
         probe.recordShortcutBurstArmed()
+        if command.invoke == true {
+            shortcutService.invokeKeyUpForUnitTesting()
+        }
     }
 
     func cleanupPersistentStateIfRequested() {
@@ -496,6 +542,11 @@ final class PersistentIntegrationModelManager: ParakeetModelManaging {
             probe.setModelState(state)
             throw ParakeetModelError.modelNotInstalled
         }
+        if scenario == .coldPerformance {
+            state = .loading
+            probe.setModelState(state)
+            try await Task.sleep(for: .milliseconds(700))
+        }
         state = .loaded
         probe.setModelState(state)
     }
@@ -619,19 +670,29 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
     private let probe: IntegrationTestProbe
     private var isRunning = false
     private var partialTask: Task<Void, Never>?
+    private let prepareDelay: Duration
+    private let stopDelay: Duration
 
     init(
         scenario: IntegrationTestScenario,
         accessibility: IntegrationAccessibilityPermission,
         probe: IntegrationTestProbe
     ) {
-        _ = scenario
         _ = accessibility
         self.probe = probe
+        switch scenario {
+        case .performance:
+            prepareDelay = .milliseconds(20)
+        case .coldPerformance:
+            prepareDelay = .seconds(5)
+        default:
+            prepareDelay = .milliseconds(300)
+        }
+        stopDelay = scenario == .performance ? .milliseconds(20) : .milliseconds(300)
     }
 
     func prepare() async throws {
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: prepareDelay)
     }
 
     func start(
@@ -658,7 +719,7 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
         probe.recordSessionStopped()
         partialTask?.cancel()
         partialTask = nil
-        try await Task.sleep(for: .milliseconds(300))
+        try await Task.sleep(for: stopDelay)
         isRunning = false
         return Self.finalTranscript
     }

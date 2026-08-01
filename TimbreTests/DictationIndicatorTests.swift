@@ -23,6 +23,23 @@ final class AudioLevelMeterTests: XCTestCase {
         XCTAssertEqual(AudioLevelMeter.normalizedLevel(rms: 2), 1)
     }
 
+    func testNormalizationLeavesHeadroomForHighGainSpeech() {
+        let highGainSpeech = powf(10, -12 / 20)
+
+        XCTAssertLessThan(AudioLevelMeter.normalizedLevel(rms: highGainSpeech), 1)
+        XCTAssertGreaterThan(AudioLevelMeter.normalizedLevel(rms: highGainSpeech), 0.7)
+    }
+
+    func testNoiseGateSuppressesQuietRoomNoise() {
+        let quietNoise = powf(10, -44 / 20)
+        let edgeNoise = powf(10, -40 / 20)
+        let speech = powf(10, -30 / 20)
+
+        XCTAssertEqual(AudioLevelMeter.normalizedLevel(rms: quietNoise), 0, accuracy: 0.001)
+        XCTAssertLessThan(AudioLevelMeter.normalizedLevel(rms: edgeNoise), 0.1)
+        XCTAssertGreaterThan(AudioLevelMeter.normalizedLevel(rms: speech), 0.4)
+    }
+
     func testMeterThrottlesAndUsesSlowerReleaseThanAttack() throws {
         let throttledMeter = AudioLevelMeter(maximumUpdatesPerSecond: 10)
         XCTAssertNotNil(throttledMeter.consume(rms: 1, time: 1))
