@@ -2,6 +2,12 @@ import AppKit
 import Foundation
 import Observation
 
+enum DictationPerformanceEvent {
+    case startToPreparing(milliseconds: Double)
+    case startToListening(milliseconds: Double)
+    case stopToCompletion(milliseconds: Double)
+}
+
 @MainActor
 @Observable
 final class AssistantController {
@@ -22,6 +28,9 @@ final class AssistantController {
     private var playbackSessionID: UUID?
     private var transcriptionCleanupTask: Task<Void, Never>?
     private var deliveryCancellation: TranscriptDeliveryCancellationToken?
+    private var startRequestedAt: UInt64?
+    private var stopRequestedAt: UInt64?
+    private let performanceReporter: @MainActor (DictationPerformanceEvent) -> Void
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
 
     init(
@@ -29,13 +38,15 @@ final class AssistantController {
         clipboard: ClipboardServicing = ClipboardService(),
         delivery: TranscriptDeliveryServicing,
         targetProvider: any DictationTargetProviding,
-        playback: (any DictationPlaybackControlling)? = nil
+        playback: (any DictationPlaybackControlling)? = nil,
+        performanceReporter: @escaping @MainActor (DictationPerformanceEvent) -> Void = { _ in }
     ) {
         self.transcription = transcription
         self.clipboard = clipboard
         self.delivery = delivery
         self.targetProvider = targetProvider
         self.playback = playback ?? NoOpDictationPlaybackController()
+        self.performanceReporter = performanceReporter
     }
 
     var liveTranscript: String { sessionState.displayedTranscript }
@@ -70,11 +81,15 @@ final class AssistantController {
     ) -> Task<Void, Never>? {
         guard canStart else { return nil }
 
+        let startedAt = DispatchTime.now().uptimeNanoseconds
         let session = DictationSessionContext(target: targetProvider.captureTarget())
         activeSession = session
         playbackSessionID = adjustsPlayback ? session.id : nil
+        startRequestedAt = startedAt
+        stopRequestedAt = nil
         audioLevel = 0
         sessionState = .preparing
+        recordStartToPreparingIfNeeded()
 
         return Task { [weak self] in
             await self?.prepareAndStart(session)
@@ -124,11 +139,13 @@ final class AssistantController {
             }
             // Stop is only available after start succeeds.
             sessionState = .listening(transcript: sessionState.displayedTranscript)
+            recordStartToListeningIfNeeded()
         } catch {
             guard activeSession?.id == session.id else { return }
             endPlayback(for: session)
             await transcription.cancel()
             activeSession = nil
+            startRequestedAt = nil
             audioLevel = 0
             sessionState = .failed(
                 kind: Self.failureKind(for: error),
@@ -144,6 +161,8 @@ final class AssistantController {
         deliveryCancellation = nil
         activeSession = nil
         playbackSessionID = nil
+        startRequestedAt = nil
+        stopRequestedAt = nil
         audioLevel = 0
         playback.shutdownForTermination()
         (transcription as? TerminationHandling)?.shutdownForTermination()
@@ -153,6 +172,7 @@ final class AssistantController {
         guard case .listening(let currentTranscript) = sessionState else { return }
         guard let session = activeSession else { return }
 
+        stopRequestedAt = DispatchTime.now().uptimeNanoseconds
         audioLevel = 0
         endPlayback(for: session)
         sessionState = .finishing(transcript: currentTranscript)
@@ -195,9 +215,11 @@ final class AssistantController {
                 transcript: finalText,
                 outcome: Self.completionOutcome(for: result)
             )
+            recordStopToCompletionIfNeeded()
         } catch {
             guard activeSession?.id == session.id else { return }
             activeSession = nil
+            stopRequestedAt = nil
             audioLevel = 0
             sessionState = .failed(
                 kind: Self.failureKind(for: error),
@@ -225,6 +247,8 @@ final class AssistantController {
         deliveryCancellation?.cancel()
         deliveryCancellation = nil
         activeSession = nil
+        startRequestedAt = nil
+        stopRequestedAt = nil
         audioLevel = 0
         endPlayback(for: session)
         sessionState = .idle
@@ -263,6 +287,40 @@ final class AssistantController {
         guard playbackSessionID == session.id else { return }
         playbackSessionID = nil
         playback.endListening()
+    }
+
+    private func recordStartToListeningIfNeeded() {
+        guard let startRequestedAt else { return }
+        let milliseconds = Self.elapsedMilliseconds(since: startRequestedAt)
+        self.startRequestedAt = nil
+        TimbreLog.line(
+            String(format: "Timbre performance: start-to-listening=%.1fms", milliseconds)
+        )
+        performanceReporter(.startToListening(milliseconds: milliseconds))
+    }
+
+    private func recordStartToPreparingIfNeeded() {
+        guard let startRequestedAt else { return }
+        let milliseconds = Self.elapsedMilliseconds(since: startRequestedAt)
+        TimbreLog.line(
+            String(format: "Timbre performance: start-to-preparing=%.1fms", milliseconds)
+        )
+        performanceReporter(.startToPreparing(milliseconds: milliseconds))
+    }
+
+    private func recordStopToCompletionIfNeeded() {
+        guard let stopRequestedAt else { return }
+        let milliseconds = Self.elapsedMilliseconds(since: stopRequestedAt)
+        self.stopRequestedAt = nil
+        TimbreLog.line(
+            String(format: "Timbre performance: stop-to-completion=%.1fms", milliseconds)
+        )
+        performanceReporter(.stopToCompletion(milliseconds: milliseconds))
+    }
+
+    private static func elapsedMilliseconds(since start: UInt64) -> Double {
+        let elapsed = DispatchTime.now().uptimeNanoseconds &- start
+        return Double(elapsed) / 1_000_000
     }
 
     private static func failureKind(for error: Error) -> SessionFailureKind {

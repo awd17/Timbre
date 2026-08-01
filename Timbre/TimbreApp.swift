@@ -263,6 +263,15 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             defaults: selectedAppPreferences.defaults
         )
         self.playbackController = playbackController
+
+        #if DEBUG
+        let performanceReporter: @MainActor (DictationPerformanceEvent) -> Void = { event in
+            integrationRuntime?.probe.recordPerformance(event)
+        }
+        #else
+        let performanceReporter: @MainActor (DictationPerformanceEvent) -> Void = { _ in }
+        #endif
+
         let dockVisibilityCoordinator = DockVisibilityCoordinator(
             preferences: selectedAppPreferences
         )
@@ -276,7 +285,8 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             clipboard: selectedClipboard,
             delivery: selectedDelivery,
             targetProvider: targetProvider,
-            playback: playbackController
+            playback: playbackController,
+            performanceReporter: performanceReporter
         )
         dictationIndicatorCoordinator = DictationIndicatorWindowController(
             controller: controller,

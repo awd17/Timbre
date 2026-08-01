@@ -77,6 +77,55 @@ final class TimbreUITests: XCTestCase {
         try runQuit()
     }
 
+    @MainActor
+    func testHotkeyLatency() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "performance",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["setupFlowRoot"].waitForExistence(timeout: 1),
+            hierarchy(app, "Performance profile should launch ready")
+        )
+
+        let textEdit = launchTextEdit()
+        textEdit.activate()
+        let initial = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == 0 && $0.modelState == "loaded"
+        }
+
+        pressGlobalHotkey(in: textEdit)
+        let listening = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == initial.sessionStarts + 1
+                && $0.lastStartToPreparingMilliseconds != nil
+                && $0.lastStartToListeningMilliseconds != nil
+        }
+        let startToPreparing = try XCTUnwrap(listening.lastStartToPreparingMilliseconds)
+        let startToListening = try XCTUnwrap(listening.lastStartToListeningMilliseconds)
+
+        pressGlobalHotkey(in: textEdit)
+        let completed = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStops == initial.sessionStops + 1
+                && $0.lastStopToCompletionMilliseconds != nil
+        }
+        let stopToCompletion = try XCTUnwrap(completed.lastStopToCompletionMilliseconds)
+
+        print(
+            String(
+                format: "Timbre e2e latency: start-to-preparing=%.1fms start-to-listening=%.1fms stop-to-completion=%.1fms",
+                startToPreparing,
+                startToListening,
+                stopToCompletion
+            )
+        )
+        XCTAssertLessThan(startToPreparing, 1_000)
+        XCTAssertLessThan(startToListening, 1_000)
+        XCTAssertLessThan(stopToCompletion, 1_000)
+    }
+
     // MARK: - Major phases
 
     @MainActor
@@ -678,6 +727,9 @@ private struct ProbeSnapshot: Codable {
     let successfulPastes: Int
     let lastPasteText: String?
     let lastDeliveryResult: String?
+    let lastStartToPreparingMilliseconds: Double?
+    let lastStartToListeningMilliseconds: Double?
+    let lastStopToCompletionMilliseconds: Double?
 }
 
 private struct ShortcutBurstCommand: Codable {

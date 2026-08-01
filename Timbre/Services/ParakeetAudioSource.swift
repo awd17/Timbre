@@ -28,12 +28,21 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
     }
 
     func prepareAccess() async throws {
-        let granted = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted:
+            return
+        case .denied:
+            throw TranscriptionError.microphonePermissionDenied
+        case .undetermined:
+            let granted = await withCheckedContinuation { continuation in
+                AVAudioApplication.requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
+                }
             }
-        }
-        guard granted else {
+            guard granted else {
+                throw TranscriptionError.microphonePermissionDenied
+            }
+        @unknown default:
             throw TranscriptionError.microphonePermissionDenied
         }
     }

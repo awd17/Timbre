@@ -33,8 +33,18 @@ final class KeyboardShortcutsGlobalShortcutService: GlobalShortcutServicing {
         KeyboardShortcuts.removeHandler(for: name)
 
         KeyboardShortcuts.onKeyUp(for: name) { [weak self] in
-            Task { @MainActor in
-                self?.handleKeyUp()
+            guard let self else { return }
+            if Thread.isMainThread {
+                // Carbon delivers app event-handler callbacks on the main
+                // thread. Run the hotkey action in this turn instead of
+                // scheduling an avoidable actor hop.
+                MainActor.assumeIsolated {
+                    self.handleKeyUp()
+                }
+            } else {
+                Task { @MainActor [weak self] in
+                    self?.handleKeyUp()
+                }
             }
         }
         didStart = true

@@ -116,12 +116,14 @@ final class DictationIndicatorPlacementStore {
 @MainActor
 final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
     private static let panelSize = NSSize(width: 84, height: 40)
-    private static let minimumPreparingNanoseconds: UInt64 = 250_000_000
+    // Keep the preparing state legible without making a warm start feel delayed.
+    private static let minimumPreparingNanoseconds: UInt64 = 100_000_000
 
     private let controller: AssistantController
     private let placementStore: DictationIndicatorPlacementStore
     private let viewModel = DictationIndicatorViewModel()
     private var panel: DictationIndicatorPanel?
+    private var didWarmPanel = false
     private var dismissalTask: Task<Void, Never>?
     private var phaseTransitionTask: Task<Void, Never>?
     private var screenObserver: NSObjectProtocol?
@@ -148,6 +150,7 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
             self?.reconcile(state)
         }
         startEscapeMonitoring()
+        warmUpPanel()
         reconcile(controller.sessionState)
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -272,17 +275,27 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func warmUpPanel() {
+        guard !didWarmPanel else { return }
+        let panel = makePanelIfNeeded()
+        restoreOrClampPanelPosition()
+        panel.contentView?.layoutSubtreeIfNeeded()
+        panel.contentView?.displayIfNeeded()
+        didWarmPanel = true
+    }
+
     private func present(_ presentation: DictationIndicatorPresentation) {
         // Set the state before creating or revealing the hosting surface. In
         // particular, the first-ever panel must be born with preparing content
         // rather than rendering one frame of the default hidden state.
         viewModel.presentation = presentation
         let panel = makePanelIfNeeded()
-        if !panel.isVisible {
+        if !didWarmPanel {
             restoreOrClampPanelPosition()
+            panel.contentView?.layoutSubtreeIfNeeded()
+            panel.contentView?.displayIfNeeded()
+            didWarmPanel = true
         }
-        panel.contentView?.layoutSubtreeIfNeeded()
-        panel.contentView?.displayIfNeeded()
         panel.orderFrontRegardless()
         announce(presentation.accessibilityLabel)
     }
