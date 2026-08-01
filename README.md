@@ -124,6 +124,16 @@ Run the unit and full-app integration suite with:
 scripts/run-full-integration-test.sh
 ```
 
+Before publishing a release, test the packaged Release auth path locally:
+
+```bash
+scripts/run-release-auth-smoke.sh --launch
+```
+
+This builds and ad-hoc-signs the Release app, validates its embedded API
+configuration, and packages a local DMG without creating a GitHub release.
+Use `--fresh` for an interactive fresh-user reset.
+
 More implementation and test documentation lives in [`docs/`](docs/). Start
 with [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for the current
 architecture and feature map.
@@ -137,11 +147,11 @@ repository secrets. Because the app is not Developer ID-signed or notarized,
 users must approve it in Privacy & Security on first launch.
 
 Make sure `MARKETING_VERSION` in the Timbre app target (both Debug and Release)
-matches the release tag without the leading `v`. To publish version 1.0.5:
+matches the release tag without the leading `v`. To publish version `X.Y.Z`:
 
 ```bash
-git tag v1.0.5
-git push origin v1.0.5
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 Pushing the tag starts the workflow. When it completes, the release appears on

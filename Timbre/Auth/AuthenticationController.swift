@@ -160,7 +160,9 @@ final class AuthenticationController {
             stored = try credentialStore.loadCredentials()
         } catch {
             guard isCurrent(operationID) else { return }
-            TimbreLog.line("Timbre auth: Keychain load failed")
+            TimbreLog.line(
+                "Timbre auth: Keychain load failed (\(error.localizedDescription))"
+            )
             apply(.signedOut)
             return
         }
@@ -211,7 +213,9 @@ final class AuthenticationController {
             credentials = nil
             try? credentialStore.clearCredentials()
             apply(.error(Self.userFacingMessage(for: error)))
-            TimbreLog.line("Timbre auth: sign-in failed")
+            TimbreLog.line(
+                "Timbre auth: sign-in failed (\(error.localizedDescription))"
+            )
         }
     }
 
@@ -232,7 +236,9 @@ final class AuthenticationController {
         } catch {
             guard isCurrent(operationID) else { return }
             apply(.error(Self.userFacingMessage(for: error)))
-            TimbreLog.line("Timbre auth: session restore failed")
+            TimbreLog.line(
+                "Timbre auth: session restore failed (\(error.localizedDescription))"
+            )
         }
     }
 
