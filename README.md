@@ -136,14 +136,19 @@ Release containing `Timbre.dmg` and its SHA-256 checksum. It does not require
 repository secrets. Because the app is not Developer ID-signed or notarized,
 users must approve it in Privacy & Security on first launch.
 
-Make sure `MARKETING_VERSION` in the Xcode project matches the release tag
-without the leading `v`. To publish version 1.0.1:
+Make sure `MARKETING_VERSION` in the Timbre app target (both Debug and Release)
+matches the release tag without the leading `v`. To publish version 1.0.5:
 
 ```bash
-git tag v1.0.1
-git push origin v1.0.1
+git tag v1.0.5
+git push origin v1.0.5
 ```
 
 Pushing the tag starts the workflow. When it completes, the release appears on
 the repository's **Releases** page and the download link at the top of this
 README automatically points to the new build.
+
+Merged pull requests targeting `main` also start the same workflow. If the PR
+bumps `MARKETING_VERSION` to a version that does not have a release yet, the
+workflow creates that release automatically. Regular PRs that do not change the
+app version do not publish a release.

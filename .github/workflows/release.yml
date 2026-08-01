@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    types: [closed]
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -17,10 +21,11 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || github.event.pull_request.merge_commit_sha }}
 
-      - name: Verify tag matches the app version
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
+      - name: Determine release version
+        id: version
         run: |
           set -euo pipefail
           app_version="$(
@@ -31,13 +36,44 @@ jobs:
               -showBuildSettings |
               awk '/MARKETING_VERSION/ { print $3; exit }'
           )"
+          echo "app_version=$app_version" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "release_tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_tag=v$app_version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip already published version
+        id: existing_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Release $RELEASE_TAG already exists; nothing to publish."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify tag matches the app version
+        if: steps.existing_release.outputs.skip != 'true'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" != "push" ]]; then
+            exit 0
+          fi
           tag_version="${RELEASE_TAG#v}"
-          if [[ "$tag_version" != "$app_version" ]]; then
-            echo "::error::Tag $RELEASE_TAG does not match MARKETING_VERSION $app_version"
+          if [[ "$tag_version" != "$APP_VERSION" ]]; then
+            echo "::error::Tag $RELEASE_TAG does not match MARKETING_VERSION $APP_VERSION"
             exit 1
           fi
 
       - name: Build release app
+        if: steps.existing_release.outputs.skip != 'true'
         run: |
           set -euo pipefail
           xcodebuild build \
@@ -55,6 +91,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app_path"
 
       - name: Package release
+        if: steps.existing_release.outputs.skip != 'true'
         run: |
           set -euo pipefail
           app_path="$RUNNER_TEMP/DerivedData/Build/Products/Release/Timbre.app"
@@ -73,14 +110,23 @@ jobs:
           shasum -a 256 Timbre.dmg > Timbre.dmg.sha256
 
       - name: Publish GitHub Release
+        if: steps.existing_release.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          MERGE_COMMIT_SHA: ${{ github.event.pull_request.merge_commit_sha }}
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" \
-            "$RUNNER_TEMP/release/Timbre.dmg" \
-            "$RUNNER_TEMP/release/Timbre.dmg.sha256" \
-            --verify-tag \
-            --generate-notes \
+          release_args=(
+            "$RELEASE_TAG"
+            "$RUNNER_TEMP/release/Timbre.dmg"
+            "$RUNNER_TEMP/release/Timbre.dmg.sha256"
+            --generate-notes
             --title "Timbre $RELEASE_TAG"
+          )
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            release_args+=(--verify-tag)
+          else
+            release_args+=(--target "$MERGE_COMMIT_SHA")
+          fi
+          gh release create "${release_args[@]}"
