@@ -117,7 +117,8 @@ EMBEDDED_API_BASE_URL="$(plutil -extract TIMBRE_API_BASE_URL raw -o - "${APP_PAT
     exit 1
 }
 
-rm -rf "${PACKAGE_DIR}" "${DMG_ROOT}"
+rm -rf "${DMG_ROOT}/Timbre.app"
+rm -f "${DMG_ROOT}/Applications" "${PACKAGE_DIR}/Timbre.dmg" "${PACKAGE_DIR}/Timbre.dmg.sha256"
 mkdir -p "${PACKAGE_DIR}" "${DMG_ROOT}"
 ditto "${APP_PATH}" "${DMG_ROOT}/Timbre.app"
 ln -s /Applications "${DMG_ROOT}/Applications"
