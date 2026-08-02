@@ -22,6 +22,7 @@ final class FakeTranscriptDelivery: TranscriptDeliveryServicing {
     private(set) var deliveredTranscripts: [String] = []
     private(set) var deliveredTargets: [DictationTargetContext?] = []
     var result: TranscriptDeliveryResult = .pasteEventPosted
+    var onDeliver: (() -> Void)?
     private let clipboard: FakeClipboard?
 
     init(clipboard: FakeClipboard? = nil, result: TranscriptDeliveryResult = .pasteEventPosted) {
@@ -35,6 +36,7 @@ final class FakeTranscriptDelivery: TranscriptDeliveryServicing {
         cancellation: TranscriptDeliveryCancellationToken
     ) async -> TranscriptDeliveryResult {
         guard !cancellation.isCancelled else { return .cancelled }
+        onDeliver?()
         deliveredTranscripts.append(transcript)
         deliveredTargets.append(target)
         clipboard?.copy(transcript)
@@ -514,6 +516,31 @@ final class AssistantControllerTests: XCTestCase {
         XCTAssertEqual(clipboard.lastCopied, "Hello world")
         XCTAssertEqual(controller.statusMessage, "Inserted.")
         XCTAssertNil(controller.activeSession)
+    }
+
+    func testKeyboardInterceptionEndsBeforeTranscriptDelivery() async {
+        let delivery = FakeTranscriptDelivery(result: .pasteEventPosted)
+        let controller = AssistantController(
+            transcription: MockTranscriptionService(
+                behavior: .success(final: "Hello", partials: [])
+            ),
+            clipboard: FakeClipboard(),
+            delivery: delivery,
+            targetProvider: FakeDictationTargetProvider()
+        )
+        var deliveryMayPostKeyboardEvents = false
+        delivery.onDeliver = {
+            XCTAssertTrue(deliveryMayPostKeyboardEvents)
+        }
+        controller.setDeliveryWillBeginHandler {
+            deliveryMayPostKeyboardEvents = true
+        }
+
+        await controller.startDictation()
+        await controller.stopDictation()
+
+        XCTAssertTrue(deliveryMayPostKeyboardEvents)
+        XCTAssertEqual(delivery.deliveredTranscripts, ["Hello"])
     }
 
     func testFallbackDeliverySetsCouldNotInsertStatus() async {

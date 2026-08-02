@@ -5,11 +5,20 @@ struct MenuBarMenuView: View {
     @ObservedObject var preferences: UserDefaultsAppPreferences
     @ObservedObject var inputDevices: CoreAudioInputDeviceManager
     var setupCoordinator: SetupCoordinator?
+    var requiresLoadedModelBeforeShortcut: Bool
     @Bindable var authentication: AuthenticationController
     var onOpenSetup: (() -> Void)?
     var onOpenSettings: (() -> Void)?
 
     var body: some View {
+        if requiresLoadedModelBeforeShortcut,
+           setupCoordinator?.modelState.isLoaded != true
+        {
+            Text("Starting dictation engine…")
+                .accessibilityIdentifier("dictationEngineStartingLabel")
+            Divider()
+        }
+
         if let setupActionTitle = setupCoordinator?.menuActionTitle {
             Button(setupActionTitle) {
                 onOpenSetup?()

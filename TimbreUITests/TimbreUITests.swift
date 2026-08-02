@@ -126,6 +126,46 @@ final class TimbreUITests: XCTestCase {
         XCTAssertLessThan(stopToCompletion, 1_000)
     }
 
+    /// Exercises the production CGEvent Command-V poster while the dictation
+    /// indicator owns Escape. The event tap must be removed before delivery so
+    /// the transcript reaches the real target application.
+    @MainActor
+    func testCompletedDictationReallyPastesIntoTextEdit() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "realPaste",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        let initial = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == 0 && $0.modelState == "loaded"
+        }
+
+        let textEdit = launchTextEdit()
+        textEdit.activate()
+        let textView = textEdit.textViews.firstMatch
+        XCTAssertTrue(textView.waitForExistence(timeout: 5), "TextEdit did not expose an editor.")
+        textView.click()
+        textView.typeText("Before ")
+
+        let armed = try invokeIntegrationShortcut(after: initial)
+        _ = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == initial.sessionStarts + 1
+        }
+        _ = try invokeIntegrationShortcut(after: armed)
+        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.lastDeliveryResult == "pasteEventPosted"
+        }
+
+        let value = textView.value as? String ?? ""
+        XCTAssertTrue(
+            value.contains("Before \(Self.transcript)"),
+            "Real Command-V did not insert the transcript. TextEdit contained: \(value)"
+        )
+        XCTAssertEqual(app.state, .runningBackground)
+    }
+
     @MainActor
     func testColdStartShowsLoadingState() throws {
         let app = launch(
@@ -167,6 +207,86 @@ final class TimbreUITests: XCTestCase {
         _ = try waitForProbe(backgroundProbeURL, timeout: 3) {
             $0.sessionStops == 1
         }
+    }
+
+    /// Escape must cancel an active dictation while the user is in the target app
+    /// (Timbre inactive), without also reaching that app. This exercises the real
+    /// active event tap rather than a unit-level cancel call.
+    @MainActor
+    func testEscapeCancelsDictationWhileTargetAppIsFrontmost() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "performance",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["setupFlowRoot"].waitForExistence(timeout: 1),
+            hierarchy(app, "Performance profile should launch ready")
+        )
+        let initial = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == 0 && $0.modelState == "loaded"
+        }
+
+        let textEdit = launchTextEdit()
+        textEdit.activate()
+        sleep(1)
+        textEdit.typeKey("f", modifierFlags: [.command])
+        let findField = textEdit.searchFields.firstMatch
+        XCTAssertTrue(
+            findField.waitForExistence(timeout: 3),
+            "TextEdit's Find bar is needed to prove Escape is consumed."
+        )
+
+        _ = try invokeIntegrationShortcut(after: initial)
+        _ = try waitForProbe(backgroundProbeURL, timeout: 5) {
+            $0.sessionStarts == initial.sessionStarts + 1
+        }
+
+        let indicator = app.descendants(matching: .any)["dictationIndicator"]
+        XCTAssertTrue(indicator.waitForExistence(timeout: 3), hierarchy(app, "Expected the indicator"))
+        XCTAssertTrue(waitForLabel(indicator, "Listening", timeout: 3))
+
+        textEdit.typeKey(.escape, modifierFlags: [])
+
+        XCTAssertTrue(
+            indicator.waitForNonExistence(timeout: 3),
+            hierarchy(app, "Escape should cancel the dictation while the target app is frontmost")
+        )
+        XCTAssertTrue(
+            findField.exists,
+            "Escape reached TextEdit and closed its Find bar instead of being owned by dictation."
+        )
+    }
+
+    /// Escape must also cancel during a deliberately slow Preparing phase, which
+    /// covers the first-use window the user reported as unresponsive.
+    @MainActor
+    func testEscapeCancelsDuringColdStartPreparing() throws {
+        let app = launch(
+            profile: backgroundProfile,
+            scenario: "coldPerformance",
+            probeURL: backgroundProbeURL,
+            reset: true,
+            menuHost: true
+        )
+        let initial = try waitForProbe(backgroundProbeURL, timeout: 3) {
+            $0.sessionStarts == 0 && $0.modelState == "loaded"
+        }
+        _ = try invokeIntegrationShortcut(after: initial)
+
+        let indicator = app.descendants(matching: .any)["dictationIndicator"]
+        XCTAssertTrue(indicator.waitForExistence(timeout: 2), hierarchy(app, "Expected the indicator"))
+        XCTAssertTrue(waitForLabel(indicator, "Preparing dictation", timeout: 3))
+
+        // The integration prepare delay is 5s; cancel while still Preparing.
+        app.typeKey(.escape, modifierFlags: [])
+
+        XCTAssertTrue(
+            indicator.waitForNonExistence(timeout: 3),
+            hierarchy(app, "Escape should cancel during the cold-start Preparing phase")
+        )
     }
 
     // MARK: - Major phases

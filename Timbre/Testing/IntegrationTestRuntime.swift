@@ -16,6 +16,7 @@ enum IntegrationTestScenario: String, CaseIterable {
     case eventPostFailure
     case performance
     case coldPerformance
+    case realPaste
     case cleanup
 }
 
@@ -305,13 +306,16 @@ final class IntegrationTestRuntime {
                  .eventPostFailure,
                  .performance,
                  .coldPerformance,
+                 .realPaste,
                  .cleanup:
                 break
             }
         }
 
         if configuration.shouldReset,
-           configuration.scenario == .performance || configuration.scenario == .coldPerformance
+           configuration.scenario == .performance
+            || configuration.scenario == .coldPerformance
+            || configuration.scenario == .realPaste
         {
             defaults.set(true, forKey: UserDefaultsOnboardingPreferences.completedWelcomeKey)
             defaults.set(true, forKey: UserDefaultsOnboardingPreferences.dismissedReadyKey)
@@ -365,7 +369,12 @@ final class IntegrationTestRuntime {
             accessibility: accessibility,
             probe: probe
         )
-        let pasteboard = NSPasteboard.withUniqueName()
+        // A real Command-V is handled by the destination application, which
+        // always reads the system pasteboard. The other integration scenarios
+        // stay isolated on a private pasteboard.
+        let pasteboard = configuration.scenario == .realPaste
+            ? NSPasteboard.general
+            : NSPasteboard.withUniqueName()
         self.pasteboard = pasteboard
         clipboard = ClipboardService(pasteboard: pasteboard)
 
@@ -433,11 +442,13 @@ final class IntegrationTestRuntime {
             base: TranscriptPasteboardService(pasteboard: pasteboard),
             simulatesRace: configuration.scenario == .pasteboardRace
         )
-        let poster = IntegrationPasteCommandPoster(
-            probe: probe,
-            pasteboard: pasteboard,
-            shouldFail: configuration.scenario == .eventPostFailure
-        )
+        let poster: any PasteCommandEventPosting = configuration.scenario == .realPaste
+            ? CGEventPasteCommandPoster()
+            : IntegrationPasteCommandPoster(
+                probe: probe,
+                pasteboard: pasteboard,
+                shouldFail: configuration.scenario == .eventPostFailure
+            )
         let secureInput: any SecureInputDetecting = configuration.scenario == .secureInput
             ? IntegrationSecureInputDetector()
             : AccessibilitySecureInputDetector()
@@ -681,14 +692,16 @@ final class IntegrationTranscriptionService: TranscriptionServicing {
         _ = accessibility
         self.probe = probe
         switch scenario {
-        case .performance:
+        case .performance, .realPaste:
             prepareDelay = .milliseconds(20)
         case .coldPerformance:
             prepareDelay = .seconds(5)
         default:
             prepareDelay = .milliseconds(300)
         }
-        stopDelay = scenario == .performance ? .milliseconds(20) : .milliseconds(300)
+        stopDelay = scenario == .performance || scenario == .realPaste
+            ? .milliseconds(20)
+            : .milliseconds(300)
     }
 
     func prepare() async throws {
@@ -784,6 +797,10 @@ final class IntegrationTranscriptPasteboard: TranscriptPasteboardServicing {
 
     func isCurrentWriteUnchanged(_ write: TrackedTranscriptWrite) -> Bool {
         !simulatesRace && base.isCurrentWriteUnchanged(write)
+    }
+
+    func pasteWasPosted(for write: TrackedTranscriptWrite) {
+        base.pasteWasPosted(for: write)
     }
 
     func cancelRestoration(

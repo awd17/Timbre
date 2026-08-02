@@ -128,7 +128,7 @@ final class ParakeetPrewarmCoordinator {
             return Eligibility(isEligible: false, reason: "non-production backend")
         }
         if !isEligible() {
-            return Eligibility(isEligible: false, reason: "setup not ready")
+            return Eligibility(isEligible: false, reason: "model not ready")
         }
         return Eligibility(isEligible: true, reason: "ready")
     }

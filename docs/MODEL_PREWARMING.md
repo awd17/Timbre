@@ -4,7 +4,7 @@ Developer notes for Timbre’s background Parakeet load that reduces first-Start
 
 ## Status
 
-After setup readiness (installed model + microphone + Accessibility + confirmed assigned shortcut), Timbre loads the on-disk Parakeet model into memory in the background. Dictation Start joins the same single-flight load when prewarming is still in progress.
+As soon as the model is installed, Timbre loads it into memory in the background. The production hotkey is registered only after that retained load completes. This hides the one-time compile in app startup and guarantees both Start and Processing use the warm manager.
 
 The DEBUG full-app integration runtime prewarms its persistent fake model. It
 never accesses FluidAudio or the network, but exercises the same readiness and
@@ -19,23 +19,38 @@ The first Start called `ensureLoaded()`, which compiled/loaded Core ML models in
 ## When prewarming begins
 
 ```text
-App launches (construction does not load)
+App launches
 → Setup reconciles readiness
-→ Production Parakeet + model installed + mic granted + Accessibility trusted + shortcut confirmed/assigned
-→ not-eligible → eligible transition
+→ Model detected on disk (cacheExists → installed)
 → ParakeetPrewarmCoordinator calls loadInstalledAndRetain()
 → AsrManager retained (state → loaded)
 ```
 
-Triggers (after readiness reconciliation completes):
+Loading the model into memory needs no microphone or Accessibility permission,
+so prewarming is **not** gated on full setup readiness. It starts as soon as the
+model is known to be on disk:
 
-- Launch readiness (if already eligible)
-- Setup becoming Ready (including first-install completion)
-- Permission recovery that newly enables dictation
+- Launch readiness (if the model is already installed)
+- The model becoming installed during setup (including a background download
+  that finishes after the setup window was closed)
+- Setup becoming Ready (first-install completion)
 
-Prewarming does **not** start from SwiftUI `onAppear`, object construction, or stale readiness checked before an async refresh finishes.
+This means the first-ever cold Core ML/ANE compile (~35s on a fresh bundle,
+`~/Library/Caches/<bundle>/com.apple.e5rt.e5bundlecache`) happens in the
+background during first-run setup instead of stalling the first dictation's
+Preparing phase.
 
-Repeated activations and readiness notifications are deduplicated: only a transition into eligibility starts proactive load.
+First-run onboarding also loads the model inside its "Preparing" step
+(`SetupCoordinator.perform(.installModel)` calls `loadInstalledAndRetain()`
+after `ensureInstalled()`), so the first dictation after Ready reuses the
+retained manager. That call and the coordinator's load share one single-flight
+load, so they never compile twice.
+
+Prewarming does **not** start from SwiftUI `onAppear`, object construction, or
+stale readiness checked before an async refresh finishes.
+
+Repeated activations and readiness notifications are deduplicated: only a
+transition into eligibility starts proactive load.
 
 ## Never downloads
 
@@ -70,8 +85,8 @@ and is the only code allowed to clear itself.
 
 | Scenario | Behavior |
 |----------|----------|
-| Prewarm first, then Start | Start awaits the same task |
-| Start first, then prewarm | Prewarm joins the same task |
+| Prewarm completes | Hotkey registers; Start and Stop reuse the loaded manager |
+| Prewarm is active | Menu shows “Starting dictation engine…”; production hotkey is not registered yet |
 | Load succeeds | One manager; later Starts reuse it |
 | Cached-only flight finds corruption while Start is waiting | Start performs one clean repair download |
 | Coordinator await cancelled | Shared manager load continues |
@@ -122,20 +137,20 @@ Record Start → Listening from stderr / Preparing UI. Example procedure:
 
 1. Quit Timbre. Launch with `--disable-model-prewarm`. Wait until Ready. Press ⌃⇧D immediately. Note Preparing → Listening.
 2. Quit. Launch normally (prewarm enabled). Wait for `Timbre prewarm: completed in …s`. Press ⌃⇧D. Note Start → Listening.
-3. Quit. Launch normally. Press ⌃⇧D during active prewarm. Confirm logs show joining one load, then Listening when load finishes.
+3. Quit. Launch normally and try ⌃⇧D during active prewarm. Confirm no dictation starts, the menu reports “Starting dictation engine…”, and the shortcut begins working after the retained load completes.
 
 | Scenario | How to read |
 |----------|-------------|
 | Warm-cache load duration | `Timbre prewarm: completed in Xs` or model load logs |
 | First Start → Listening (prewarm disabled) | Baseline |
 | First Start → Listening (after prewarm) | Should be substantially shorter |
-| Start during prewarm | Joins shared load; Preparing until load completes |
+| Shortcut during prewarm | No session starts; registration waits for the retained load |
 
 Fill in machine-specific numbers when verifying locally. Success requires measured improvement, not only a “loaded” log line.
 
 ### Captured in this PR’s automated verification
 
-- Unit tests: TimbreTests green across repeated runs. The real `ParakeetModelManager` is exercised through an injected FluidAudio boundary for concurrent flights, corrupt-cache invalidation, transient failures, install repair, and Start joining prewarm.
+- Unit tests: TimbreTests green across repeated runs. The real `ParakeetModelManager` is exercised through an injected FluidAudio boundary for concurrent flights, corrupt-cache invalidation, transient failures, and install repair. A focused transcription startup test verifies Start reuses a retained prewarmed manager without another load.
 - Debug and Release app builds succeed.
 - Warm on-disk cache model preparation (ParakeetSmokeTest, cache reuse): **~0.66s** download/load preparation on the development machine (`download_and_model_preparation_seconds: 0.656`). This is a lower bound for in-process `ensureLoaded` / prewarm cost; app Start→Listening also includes mic prepare and UI transitions.
 - GUI Start→Listening wall times and Activity Monitor memory: run the manual procedure above; record machine-specific before/after values when verifying interactively.

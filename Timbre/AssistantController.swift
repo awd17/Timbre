@@ -32,6 +32,7 @@ final class AssistantController {
     private var stopRequestedAt: UInt64?
     private let performanceReporter: @MainActor (DictationPerformanceEvent) -> Void
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
+    @ObservationIgnored private var deliveryWillBeginHandler: (() -> Void)?
 
     init(
         transcription: TranscriptionServicing,
@@ -58,6 +59,12 @@ final class AssistantController {
 
     func setSessionStateHandler(_ handler: ((SessionState) -> Void)?) {
         sessionStateHandler = handler
+    }
+
+    /// Delivery emits synthetic keyboard events. Keyboard interception used by
+    /// the active session must be removed before this callback returns.
+    func setDeliveryWillBeginHandler(_ handler: (() -> Void)?) {
+        deliveryWillBeginHandler = handler
     }
 
     /// Starts the visible session synchronously, then performs preparation asynchronously.
@@ -201,6 +208,7 @@ final class AssistantController {
                 return
             }
 
+            deliveryWillBeginHandler?()
             let deliveryCancellation = TranscriptDeliveryCancellationToken()
             self.deliveryCancellation = deliveryCancellation
             let result = await delivery.deliver(
@@ -208,6 +216,7 @@ final class AssistantController {
                 to: session.target,
                 cancellation: deliveryCancellation
             )
+            TimbreLog.line("Timbre delivery: result=\(result)")
             if self.deliveryCancellation === deliveryCancellation {
                 self.deliveryCancellation = nil
             }

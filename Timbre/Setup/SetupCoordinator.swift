@@ -637,6 +637,13 @@ final class SetupCoordinator {
                 return
             }
             try? await modelManager.ensureInstalled()
+            // Load the model into memory now, hidden inside this "Preparing"
+            // step, so the first dictation after Ready is warm. Without this,
+            // the first-ever in-memory load pays a cold Core ML/ANE compile
+            // (~10-15s) inside the first dictation's Preparing phase.
+            if modelManager.state.isInstalled {
+                try? await modelManager.loadInstalledAndRetain()
+            }
         }
     }
 

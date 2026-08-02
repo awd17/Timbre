@@ -76,6 +76,9 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let shortcutState: KeyboardShortcutsOnboardingAdapter
     let shortcutRecorderName: KeyboardShortcuts.Name
 
+    private let requiresLoadedModelBeforeShortcut: Bool
+    private let skipsGlobalShortcut: Bool
+
     private var debugWindow: NSWindow?
     #if DEBUG
     private var debugWindowCloseDelegate: DebugWindowCloseDelegate?
@@ -92,6 +95,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             preferences: appPreferences,
             inputDevices: audioInputDevices,
             setupCoordinator: setupCoordinator,
+            requiresLoadedModelBeforeShortcut: requiresLoadedModelBeforeShortcut,
             authentication: authenticationController,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
@@ -258,6 +262,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         self.shortcutState = selectedShortcutState
         appPreferences = selectedAppPreferences
         audioInputDevices = selectedAudioInputDevices
+        let disableModelPrewarm = Self.shouldDisableModelPrewarm(arguments: arguments)
+        let skipsGlobalShortcut = Self.shouldSkipGlobalShortcut(arguments: arguments)
+        let requiresLoadedModelBeforeShortcut = shouldConfigurePrewarm
+            && isProductionBackendForPrewarm
+            && !disableModelPrewarm
+        self.skipsGlobalShortcut = skipsGlobalShortcut
+        self.requiresLoadedModelBeforeShortcut = requiresLoadedModelBeforeShortcut
         let playbackController = DictationPlaybackController(
             preferences: selectedAppPreferences,
             defaults: selectedAppPreferences.defaults
@@ -294,27 +305,60 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 defaults: selectedAppPreferences.defaults
             )
         )
-        shortcutCoordinator = DictationShortcutCoordinator(
+        let selectedShortcutCoordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: selectedSetupCoordinator,
             shortcutService: selectedShortcutService
         )
+        shortcutCoordinator = selectedShortcutCoordinator
 
         if shouldConfigurePrewarm, let selectedSetupCoordinator {
-            let prewarmCoordinator = ParakeetPrewarmCoordinator(
+            var prewarmCoordinator: ParakeetPrewarmCoordinator?
+            prewarmCoordinator = ParakeetPrewarmCoordinator(
                 modelManager: selectedModelManager,
-                isEligible: { [weak selectedSetupCoordinator] in
-                    selectedSetupCoordinator?.allowsDictation == true
+                isEligible: { [weak selectedModelManager] in
+                    // Loading the model into memory needs no microphone or
+                    // Accessibility permission. Prewarm as soon as the model is
+                    // on disk so the cold Core ML/ANE compile happens in the
+                    // background during first-run setup instead of stalling the
+                    // first dictation's Preparing phase (~35s on a fresh bundle).
+                    switch selectedModelManager?.state {
+                    case .installed, .loaded:
+                        return true
+                    case .checking, .notInstalled, .downloading, .loading, .failed, nil:
+                        return false
+                    }
                 },
                 isParakeetProductionBackend: isProductionBackendForPrewarm,
-                disablePrewarm: Self.shouldDisableModelPrewarm(arguments: arguments),
-                onModelStateChanged: { [weak selectedSetupCoordinator] in
+                disablePrewarm: disableModelPrewarm,
+                onModelStateChanged: {
+                    [weak selectedSetupCoordinator, weak prewarmCoordinator,
+                     weak selectedModelManager, weak selectedShortcutCoordinator] in
                     selectedSetupCoordinator?.modelPreparationDidChange()
+                    // The model can become installed without a readiness
+                    // transition (e.g. download finished in the background after
+                    // the user closed setup), so re-evaluate on every model
+                    // state change too.
+                    prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
+                    if requiresLoadedModelBeforeShortcut,
+                       !skipsGlobalShortcut,
+                       selectedModelManager?.state.isLoaded == true
+                    {
+                        selectedShortcutCoordinator?.start()
+                    }
                 }
             )
             self.prewarmCoordinator = prewarmCoordinator
-            selectedSetupCoordinator.onReadinessChanged = { [weak prewarmCoordinator] _ in
+            selectedSetupCoordinator.onReadinessChanged = {
+                [weak prewarmCoordinator, weak selectedModelManager,
+                 weak selectedShortcutCoordinator] _ in
                 prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
+                if requiresLoadedModelBeforeShortcut,
+                   !skipsGlobalShortcut,
+                   selectedModelManager?.state.isLoaded == true
+                {
+                    selectedShortcutCoordinator?.start()
+                }
             }
         } else {
             prewarmCoordinator = nil
@@ -359,10 +403,12 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         #endif
 
-        if !Self.shouldSkipGlobalShortcut(arguments: ProcessInfo.processInfo.arguments) {
-            shortcutCoordinator.start()
-        } else {
+        if skipsGlobalShortcut {
             TimbreLog.line("Timbre shortcut: skipped (--parakeet-fixture)")
+        } else if requiresLoadedModelBeforeShortcut, !modelManager.state.isLoaded {
+            TimbreLog.line("Timbre shortcut: deferred until launch model prewarm completes.")
+        } else {
+            shortcutCoordinator.start()
         }
 
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
