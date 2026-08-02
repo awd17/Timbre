@@ -344,10 +344,13 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                     // the user closed setup), so re-evaluate on every model
                     // state change too.
                     prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
-                    if requiresLoadedModelBeforeShortcut,
-                       !skipsGlobalShortcut,
-                       selectedModelManager?.state.isLoaded == true
-                    {
+                    if let modelState = selectedModelManager?.state,
+                       Self.shouldStartShortcutAfterPrewarmCompletion(
+                           requiresLoadedModelBeforeShortcut: requiresLoadedModelBeforeShortcut,
+                           skipsGlobalShortcut: skipsGlobalShortcut,
+                           modelState: modelState,
+                           setupIsComplete: selectedSetupCoordinator?.settingsAreUnlocked == true
+                       ) {
                         selectedIndicatorCoordinator?.prewarmSessionInfrastructure()
                         Self.prewarmInputIfSupported(selectedTranscription)
                         selectedShortcutCoordinator?.start()
@@ -562,6 +565,23 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
                 "Timbre microphone: background preparation skipped (\(error.localizedDescription))."
             )
         }
+    }
+
+    static func shouldStartShortcutAfterPrewarmCompletion(
+        requiresLoadedModelBeforeShortcut: Bool,
+        skipsGlobalShortcut: Bool,
+        modelState: ModelPreparationState,
+        setupIsComplete: Bool
+    ) -> Bool {
+        guard !skipsGlobalShortcut else { return false }
+        guard requiresLoadedModelBeforeShortcut else { return true }
+        if modelState.isLoaded { return true }
+
+        // A returning user must not lose their shortcut for the entire launch
+        // after a transient retained-load failure. `installed` is sufficient
+        // for the normal dictation path to retry `ensureLoaded()`. First-run
+        // setup still waits for a successful retained load before unlocking.
+        return modelState.isInstalled && setupIsComplete
     }
 
     private static func shouldDisableModelPrewarm(arguments: [String]) -> Bool {
