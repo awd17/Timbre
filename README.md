@@ -159,22 +159,18 @@ Release containing `Timbre.dmg` and its SHA-256 checksum. It does not require
 repository secrets. Because the app is not Developer ID-signed or notarized,
 users must approve it in Privacy & Security on first launch.
 
-Make sure `MARKETING_VERSION` in the Timbre app target (both Debug and Release)
-matches the release tag without the leading `v`. To publish version `X.Y.Z`:
+To bump the patch version and publish a release automatically, make sure your
+working tree is clean, check out `main`, and run:
 
 ```bash
 scripts/bump-version.sh
-git tag vX.Y.Z
-git push origin vX.Y.Z
 ```
 
 `scripts/bump-version.sh` increments the patch version automatically—for
-example, `1.0.6` becomes `1.0.7`—and updates both app configurations. Review and
-commit that change before tagging it.
-
-Pushing the tag starts the workflow. When it completes, the release appears on
-the repository's **Releases** page and the download link at the top of this
-README automatically points to the new build.
+example, `1.0.6` becomes `1.0.7`—then commits the change, pushes `main`, creates
+the matching release tag, and pushes that tag. When the workflow completes, the
+release appears on the repository's **Releases** page and the download link at
+the top of this README automatically points to the new build.
 
 Merged pull requests targeting `main` also start the same workflow. If the PR
 bumps `MARKETING_VERSION` to a version that does not have a release yet, the
