@@ -5,27 +5,70 @@ import Foundation
 ///
 /// A global `NSEvent` monitor can observe Escape in another application, but it
 /// cannot prevent that application from handling the same key press. An active
-/// session event tap can consume the key-down instead. The tap is installed only
-/// for Preparing/Listening/Processing and is removed as soon as the session ends,
-/// so Escape behaves normally everywhere else.
+/// session event tap can consume the key-down instead. The tap is enabled only
+/// for Preparing/Listening/Processing and stays disabled between sessions, so
+/// Escape behaves normally everywhere else without paying setup cost each time.
 final class EscapeKeyInterceptor {
     private static let escapeKeyCode: Int64 = 53
 
     private let onEscape: @MainActor () -> Void
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
+    private var isActive = false
 
     init(onEscape: @escaping @MainActor () -> Void) {
         self.onEscape = onEscape
     }
 
     deinit {
-        stop()
+        shutdown()
+    }
+
+    /// Create the event tap while the app is already doing setup work, but
+    /// leave it disabled until dictation starts.
+    @discardableResult
+    func prepare() -> Bool {
+        if eventTap != nil { return true }
+
+        guard installEventTap() else { return false }
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+        TimbreLog.line("Timbre Escape: interception prepared.")
+        return true
     }
 
     @discardableResult
     func start() -> Bool {
-        if eventTap != nil { return true }
+        guard prepare(), let eventTap else { return false }
+        isActive = true
+        CGEvent.tapEnable(tap: eventTap, enable: true)
+        TimbreLog.line("Timbre Escape: interception enabled for active dictation.")
+        return true
+    }
+
+    /// Disable interception while retaining the expensive event-tap setup for
+    /// the next session.
+    func stop() {
+        isActive = false
+        if let eventTap {
+            CGEvent.tapEnable(tap: eventTap, enable: false)
+        }
+    }
+
+    func shutdown() {
+        stop()
+        if let runLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+        }
+        if let eventTap {
+            CFMachPortInvalidate(eventTap)
+        }
+        eventTap = nil
+        runLoopSource = nil
+    }
+
+    private func installEventTap() -> Bool {
 
         let eventMask = CGEventMask(1) << CGEventType.keyDown.rawValue
         guard let eventTap = CGEvent.tapCreate(
@@ -51,23 +94,7 @@ final class EscapeKeyInterceptor {
         self.eventTap = eventTap
         runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-        TimbreLog.line("Timbre Escape: interception enabled for active dictation.")
         return true
-    }
-
-    func stop() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-        }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        }
-        if let eventTap {
-            CFMachPortInvalidate(eventTap)
-        }
-        eventTap = nil
-        runLoopSource = nil
     }
 
     static func shouldIntercept(
@@ -85,7 +112,7 @@ final class EscapeKeyInterceptor {
             .takeUnretainedValue()
 
         if eventType == .tapDisabledByTimeout || eventType == .tapDisabledByUserInput {
-            if let eventTap = interceptor.eventTap {
+            if interceptor.isActive, let eventTap = interceptor.eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)

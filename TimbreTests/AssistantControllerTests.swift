@@ -477,6 +477,42 @@ final class AssistantControllerTests: XCTestCase {
         XCTAssertEqual(observedStates.first, .preparing)
     }
 
+    func testPerformanceStagesUseNonOverlappingTimingBoundaries() async throws {
+        let transcription = SuspendingTranscriptionService(suspension: .prepare)
+        var now: UInt64 = 1_050_000_000
+        var reported: [DictationPerformanceEvent] = []
+        let controller = AssistantController(
+            transcription: transcription,
+            clipboard: FakeClipboard(),
+            delivery: FakeTranscriptDelivery(result: .pasteEventPosted),
+            targetProvider: FakeDictationTargetProvider(),
+            performanceReporter: { reported.append($0) },
+            uptimeNanoseconds: { now }
+        )
+
+        let task = controller.beginDictationFromShortcut(requestedAt: 1_000_000_000)
+        await waitUntil { transcription.prepareCallCount == 1 }
+        now = 1_130_000_000
+        transcription.resumePreparation()
+        await task?.value
+
+        let timings = reported.reduce(into: [String: Double]()) { result, event in
+            switch event {
+            case .startToPreparing(let milliseconds):
+                result["startToPreparing"] = milliseconds
+            case .preparingToListening(let milliseconds):
+                result["preparingToListening"] = milliseconds
+            case .startToListening(let milliseconds):
+                result["startToListening"] = milliseconds
+            case .stopToCompletion:
+                break
+            }
+        }
+        XCTAssertEqual(try XCTUnwrap(timings["startToPreparing"]), 50, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(timings["preparingToListening"]), 80, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(timings["startToListening"]), 130, accuracy: 0.001)
+    }
+
     func testSuccessfulDictationDeliversFinalTranscript() async {
         let mock = MockTranscriptionService(
             behavior: .success(final: "Hello world", partials: ["Hello", "Hello world"]),

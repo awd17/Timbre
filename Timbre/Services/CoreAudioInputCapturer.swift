@@ -28,6 +28,7 @@ final class CoreAudioInputCapturer {
     /// AU refcon target. Outlives in-flight callbacks; owns optional render state.
     private var callbackGate: CallbackGate?
     private var isRunning = false
+    private var preparedDeviceID: AudioDeviceID?
 
     init(inputDevices: CoreAudioInputDeviceManager) {
         self.inputDevices = inputDevices
@@ -39,7 +40,122 @@ final class CoreAudioInputCapturer {
     ) throws -> Configuration {
         stop()
 
-        inputDevices.refresh()
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        let device = try resolveDevice()
+        let format = try makeClientFormat(for: device.audioDeviceID)
+        let reusedPreparedUnit = canReusePreparedUnit(for: device, format: format)
+
+        do {
+            if !reusedPreparedUnit {
+                shutdown()
+                try prepare(device: device, format: format)
+            }
+            guard let unit = audioUnit else {
+                throw TranscriptionError.audioEngineFailed
+            }
+            try attachCallback(
+                to: unit,
+                onBuffer: onBuffer,
+                onAudioLevel: onAudioLevel
+            )
+            try check(AudioOutputUnitStart(unit), operation: "Starting input audio unit")
+            isRunning = true
+        } catch {
+            shutdown()
+            throw error
+        }
+
+        TimbreLog.line("Timbre microphone: selected \(device.name) (input-only HAL)")
+        let milliseconds = Double(
+            DispatchTime.now().uptimeNanoseconds &- startedAt
+        ) / 1_000_000
+        TimbreLog.line(
+            String(
+                format: "Timbre performance: microphone-start=%.1fms preparedUnitReused=%@",
+                milliseconds,
+                reusedPreparedUnit ? "true" : "false"
+            )
+        )
+        return Configuration(
+            device: device,
+            sampleRate: asbd.mSampleRate,
+            channelCount: AVAudioChannelCount(max(asbd.mChannelsPerFrame, 1))
+        )
+    }
+
+    /// Build and initialize the input-only HAL unit without starting capture.
+    /// Safe to run after onboarding has microphone permission; the next Start
+    /// only attaches session callbacks and starts the already-prepared unit.
+    func prepare() throws {
+        stop()
+        let device = try resolveDevice()
+        let format = try makeClientFormat(for: device.audioDeviceID)
+        guard !canReusePreparedUnit(for: device, format: format) else { return }
+        shutdown()
+        try prepare(device: device, format: format)
+        TimbreLog.line("Timbre microphone: prepared input-only HAL unit.")
+    }
+
+    func stop() {
+        // Lifetime boundary for the realtime callback:
+        // 1) detach render state under the gate lock (new entries no-op)
+        // 2) stop IO (HAL stops synchronously w.r.t. the current render)
+        // 3) wait until any in-flight entry finishes
+        //
+        // The stopped, initialized unit is deliberately retained. Recreating
+        // and reinitializing HAL for every dictation dominated warm startup.
+        let gate = callbackGate
+        gate?.detach()
+
+        if let unit = audioUnit {
+            if isRunning {
+                AudioOutputUnitStop(unit)
+            }
+        }
+        isRunning = false
+
+        gate?.waitUntilIdle()
+    }
+
+    /// Fully releases the prepared unit. Used for app termination, device
+    /// changes, and failed setup; ordinary session teardown calls `stop()`.
+    func shutdown() {
+        stop()
+
+        if let unit = audioUnit {
+            var cleared = AURenderCallbackStruct(
+                inputProc: nil,
+                inputProcRefCon: nil
+            )
+            AudioUnitSetProperty(
+                unit,
+                kAudioOutputUnitProperty_SetInputCallback,
+                kAudioUnitScope_Global,
+                0,
+                &cleared,
+                UInt32(MemoryLayout<AURenderCallbackStruct>.size)
+            )
+            callbackGate?.releaseForAudioUnit()
+            AudioUnitUninitialize(unit)
+            AudioComponentInstanceDispose(unit)
+        }
+        audioUnit = nil
+        callbackGate = nil
+        preparedDeviceID = nil
+        if let renderBuffer {
+            freeAudioBufferList(renderBuffer)
+            self.renderBuffer = nil
+        }
+    }
+
+    // MARK: - Setup
+
+    private func resolveDevice() throws -> AudioInputDevice {
+        // CoreAudioInputDeviceManager already monitors device/default changes.
+        // Avoid a full hardware enumeration on every shortcut press.
+        if inputDevices.effectiveDevice == nil {
+            inputDevices.refresh()
+        }
         if inputDevices.unavailableSelection != nil {
             TimbreLog.line(
                 "Timbre microphone: preferred device is unavailable; using System Default."
@@ -48,7 +164,23 @@ final class CoreAudioInputCapturer {
         guard let device = inputDevices.effectiveDevice else {
             throw TranscriptionError.audioEngineFailed
         }
+        return device
+    }
 
+    private func canReusePreparedUnit(
+        for device: AudioInputDevice,
+        format: AudioStreamBasicDescription
+    ) -> Bool {
+        audioUnit != nil
+            && preparedDeviceID == device.audioDeviceID
+            && asbd.mSampleRate == format.mSampleRate
+            && asbd.mChannelsPerFrame == format.mChannelsPerFrame
+    }
+
+    private func prepare(
+        device: AudioInputDevice,
+        format: AudioStreamBasicDescription
+    ) throws {
         var description = AudioComponentDescription(
             componentType: kAudioUnitType_Output,
             componentSubType: kAudioUnitSubType_HALOutput,
@@ -73,76 +205,17 @@ final class CoreAudioInputCapturer {
         do {
             try enableIO(on: unit)
             try setCurrentDevice(device.audioDeviceID, on: unit)
-            let streamFormat = try makeClientFormat(for: device.audioDeviceID)
-            asbd = streamFormat
-            try setClientFormat(streamFormat, on: unit)
-            try prepareRenderBuffer(format: streamFormat, on: unit)
-            try installCallback(
-                on: unit,
-                onBuffer: onBuffer,
-                onAudioLevel: onAudioLevel
-            )
+            asbd = format
+            try setClientFormat(format, on: unit)
+            try prepareRenderBuffer(format: format, on: unit)
+            try installCallbackGate(on: unit)
             try check(AudioUnitInitialize(unit), operation: "Initializing input audio unit")
-            try check(AudioOutputUnitStart(unit), operation: "Starting input audio unit")
-            isRunning = true
+            preparedDeviceID = device.audioDeviceID
         } catch {
-            stop()
+            shutdown()
             throw error
         }
-
-        TimbreLog.line("Timbre microphone: selected \(device.name) (input-only HAL)")
-        return Configuration(
-            device: device,
-            sampleRate: asbd.mSampleRate,
-            channelCount: AVAudioChannelCount(max(asbd.mChannelsPerFrame, 1))
-        )
     }
-
-    func stop() {
-        // Lifetime boundary for the realtime callback:
-        // 1) detach render state under the gate lock (new entries no-op)
-        // 2) stop IO (HAL stops synchronously w.r.t. the current render)
-        // 3) clear the AU callback refcon
-        // 4) wait until any in-flight entry finishes
-        // 5) release the gate retain, dispose the unit, free buffers
-        let gate = callbackGate
-        gate?.detach()
-
-        if let unit = audioUnit {
-            if isRunning {
-                AudioOutputUnitStop(unit)
-            }
-            var cleared = AURenderCallbackStruct(
-                inputProc: nil,
-                inputProcRefCon: nil
-            )
-            AudioUnitSetProperty(
-                unit,
-                kAudioOutputUnitProperty_SetInputCallback,
-                kAudioUnitScope_Global,
-                0,
-                &cleared,
-                UInt32(MemoryLayout<AURenderCallbackStruct>.size)
-            )
-        }
-        isRunning = false
-
-        gate?.waitUntilIdle()
-        gate?.releaseForAudioUnit()
-
-        if let unit = audioUnit {
-            AudioUnitUninitialize(unit)
-            AudioComponentInstanceDispose(unit)
-        }
-        audioUnit = nil
-        callbackGate = nil
-        if let renderBuffer {
-            freeAudioBufferList(renderBuffer)
-            self.renderBuffer = nil
-        }
-    }
-
-    // MARK: - Setup
 
     private func enableIO(on unit: AudioUnit) throws {
         var enable: UInt32 = 1
@@ -253,8 +326,8 @@ final class CoreAudioInputCapturer {
         renderBuffer = allocateAudioBufferList(channels: channels, frames: Int(maxFrames))
     }
 
-    private func installCallback(
-        on unit: AudioUnit,
+    private func attachCallback(
+        to unit: AudioUnit,
         onBuffer: @escaping @Sendable (AVAudioPCMBuffer) -> Void,
         onAudioLevel: @escaping @MainActor (Float) -> Void
     ) throws {
@@ -269,14 +342,21 @@ final class CoreAudioInputCapturer {
             onBuffer: onBuffer,
             onAudioLevel: onAudioLevel
         )
-        let gate = CallbackGate(state: state)
-        callbackGate = gate
-        // Retain gate for the AU refcon lifetime; balanced in stop() after idle.
-        gate.retainForAudioUnit()
+        guard let callbackGate else {
+            throw TranscriptionError.audioEngineFailed
+        }
+        callbackGate.attach(state)
+    }
+
+    private func installCallbackGate(on unit: AudioUnit) throws {
+        let newGate = CallbackGate(state: nil)
+        callbackGate = newGate
+        // Retain gate for the AU refcon lifetime; balanced by shutdown().
+        newGate.retainForAudioUnit()
 
         var callbackStruct = AURenderCallbackStruct(
             inputProc: Self.renderCallback,
-            inputProcRefCon: Unmanaged.passUnretained(gate).toOpaque()
+            inputProcRefCon: Unmanaged.passUnretained(newGate).toOpaque()
         )
         try check(
             AudioUnitSetProperty(
@@ -307,8 +387,14 @@ final class CoreAudioInputCapturer {
         private var inFlightEntries = 0
         private var audioUnitRetained = false
 
-        init(state: CallbackState) {
+        init(state: CallbackState?) {
             self.state = state
+        }
+
+        func attach(_ state: CallbackState) {
+            lock.lock()
+            self.state = state
+            lock.unlock()
         }
 
         func retainForAudioUnit() {

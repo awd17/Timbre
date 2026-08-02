@@ -254,6 +254,25 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { coordinator.step == .ready }
     }
 
+    func testExistingCacheStaysInPreparingUntilRetainedLoadFinishes() async {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        model.suspendsRetainLoad = true
+
+        let coordinator = makeCoordinator(model: model)
+        await model.waitForRetainLoadStart()
+
+        XCTAssertEqual(coordinator.step, .preparing)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        XCTAssertEqual(model.loadInstalledAndRetainCallCount, 1)
+
+        model.resumeRetainLoad()
+        await waitUntil { coordinator.step == .ready }
+
+        XCTAssertEqual(model.state, .loaded)
+    }
+
     func testMissingShortcutAfterCompletedSetupReturnsToShortcutRecovery() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
@@ -470,7 +489,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testExistingUserShortcutOnlyThenReady() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         XCTAssertEqual(coordinator.step, .shortcut)
         confirmShortcut(coordinator)
@@ -670,7 +689,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testRecheckTextInsertionPromptsForSystemSettingsWhenStillDenied() async {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
@@ -698,7 +717,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testTryAgainReregistersAndAdvancesWhenAccessibilityBecomesTrusted() async {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
@@ -718,7 +737,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testSettingsStayLockedUntilReadyWindowAcknowleged() {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         // model ready, permissions granted, but user has not dismissed ready window
         XCTAssertEqual(coordinator.step, .ready)
@@ -828,7 +847,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testAcknowledgeReadyPersistsDismissal() {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         coordinator.acknowledgeReadyAndDismiss()
         XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
@@ -885,7 +904,7 @@ final class SetupCoordinatorTests: XCTestCase {
             displayString: "⌃⌥D"
         )
         let coordinator = makeCoordinator(
-            model: FakeParakeetModelManager(initialState: .installed),
+            model: FakeParakeetModelManager(initialState: .loaded),
             shortcut: shortcut
         )
         XCTAssertEqual(coordinator.step, .ready)

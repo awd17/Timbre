@@ -91,6 +91,7 @@ struct IntegrationProbeSnapshot: Codable, Equatable {
     var lastPasteText: String?
     var lastDeliveryResult: String?
     var lastStartToPreparingMilliseconds: Double?
+    var lastPreparingToListeningMilliseconds: Double?
     var lastStartToListeningMilliseconds: Double?
     var lastStopToCompletionMilliseconds: Double?
 }
@@ -174,8 +175,11 @@ final class IntegrationTestProbe {
             // Timing values describe one session. Clear downstream milestones
             // so a relaunch or restart cannot mistake an earlier session for
             // the current one reaching listening or completion.
+            snapshot.lastPreparingToListeningMilliseconds = nil
             snapshot.lastStartToListeningMilliseconds = nil
             snapshot.lastStopToCompletionMilliseconds = nil
+        case .preparingToListening(let milliseconds):
+            snapshot.lastPreparingToListeningMilliseconds = milliseconds
         case .startToListening(let milliseconds):
             snapshot.lastStartToListeningMilliseconds = milliseconds
         case .stopToCompletion(let milliseconds):

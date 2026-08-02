@@ -101,9 +101,13 @@ final class TimbreUITests: XCTestCase {
         let listening = try waitForProbe(backgroundProbeURL, timeout: 3) {
             $0.sessionStarts == initial.sessionStarts + 1
                 && $0.lastStartToPreparingMilliseconds != nil
+                && $0.lastPreparingToListeningMilliseconds != nil
                 && $0.lastStartToListeningMilliseconds != nil
         }
         let startToPreparing = try XCTUnwrap(listening.lastStartToPreparingMilliseconds)
+        let preparingToListening = try XCTUnwrap(
+            listening.lastPreparingToListeningMilliseconds
+        )
         let startToListening = try XCTUnwrap(listening.lastStartToListeningMilliseconds)
 
         pressGlobalHotkey(in: textEdit)
@@ -115,8 +119,9 @@ final class TimbreUITests: XCTestCase {
 
         print(
             String(
-                format: "Timbre e2e latency: start-to-preparing=%.1fms start-to-listening=%.1fms stop-to-completion=%.1fms",
+                format: "Timbre e2e latency: start-to-preparing=%.1fms preparing-to-listening=%.1fms start-to-listening=%.1fms stop-to-completion=%.1fms",
                 startToPreparing,
+                preparingToListening,
                 startToListening,
                 stopToCompletion
             )
@@ -909,6 +914,7 @@ private struct ProbeSnapshot: Codable {
     let lastPasteText: String?
     let lastDeliveryResult: String?
     let lastStartToPreparingMilliseconds: Double?
+    let lastPreparingToListeningMilliseconds: Double?
     let lastStartToListeningMilliseconds: Double?
     let lastStopToCompletionMilliseconds: Double?
 }

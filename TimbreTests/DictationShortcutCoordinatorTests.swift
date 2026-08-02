@@ -104,6 +104,8 @@ final class DictationShortcutCoordinatorTests: XCTestCase {
                 switch event {
                 case .startToPreparing(let milliseconds):
                     startToPreparing = milliseconds
+                case .preparingToListening:
+                    break
                 case .stopToCompletion(let milliseconds):
                     stopToCompletion = milliseconds
                 case .startToListening:

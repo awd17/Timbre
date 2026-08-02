@@ -177,12 +177,16 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         dismissalTask = nil
         phaseTransitionTask?.cancel()
         phaseTransitionTask = nil
-        escapeKeyInterceptor.stop()
+        escapeKeyInterceptor.shutdown()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
         screenObserver = nil
         panel?.orderOut(nil)
+    }
+
+    func prewarmSessionInfrastructure() {
+        _ = escapeKeyInterceptor.prepare()
     }
 
     func resetPlacement() {

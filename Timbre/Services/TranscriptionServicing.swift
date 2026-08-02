@@ -43,6 +43,12 @@ protocol TranscriptionServicing: AnyObject {
     func cancel() async
 }
 
+/// Backends that can initialize input hardware without beginning capture.
+@MainActor
+protocol TranscriptionInputPrewarming: AnyObject {
+    func prewarmInput() throws
+}
+
 /// Backends that hold microphone hardware must tear it down synchronously on quit.
 @MainActor
 protocol TerminationHandling: AnyObject {
