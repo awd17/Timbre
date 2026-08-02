@@ -88,8 +88,17 @@ private enum SetupPolicy {
         }
 
         switch facts.model {
-        case .installed, .loaded:
+        case .loaded:
             return SetupDecision(step: .ready, effect: .none)
+        case .installed where facts.dismissedReady:
+            // Returning users should not see onboarding on every launch while
+            // the retained model is being restored in the background.
+            return SetupDecision(step: .ready, effect: .none)
+        case .installed:
+            // Downloaded files are not enough for a first-run Ready screen.
+            // Loading the encoder once can trigger a long Core ML/ANE compile,
+            // so keep that work inside onboarding.
+            return SetupDecision(step: .preparing, effect: .installModel)
         case .loading where facts.dismissedReady:
             return SetupDecision(step: .ready, effect: .none)
         case .loading, .downloading:
@@ -202,6 +211,7 @@ final class SetupCoordinator {
     private var permissionMonitorTask: Task<Void, Never>?
     private var recheckTask: Task<Void, Never>?
     private var previousAllowsDictation: Bool?
+    private var retainedLoadFailed = false
     /// After an in-session sign-in succeeds, keep the sign-in step visible until Continue.
     private var awaitingSignInContinue = false
 
@@ -352,6 +362,9 @@ final class SetupCoordinator {
     /// as prewarm discovering and invalidating an unusable on-disk model cache.
     func modelPreparationDidChange() {
         guard featureEnabled else { return }
+        if modelManager.state.isLoaded {
+            retainedLoadFailed = false
+        }
         reconcile(intent: .refresh)
     }
 
@@ -468,7 +481,7 @@ final class SetupCoordinator {
     /// Keeps model preparation running while suppressing a later Ready-only launch.
     /// A failed or missing install clears this preference during reconciliation.
     func continuePreparationInBackground() {
-        guard modelManager.state.isInstalling else { return }
+        guard step == .preparing else { return }
         preferences.dismissedReady = true
         preferences.completedWelcome = true
         TimbreLog.line("Timbre onboarding: continuing preparation in background")
@@ -553,6 +566,7 @@ final class SetupCoordinator {
         case .requestAccessibility:
             requestedEffect = .requestAccessibility
         case .retryInstall:
+            retainedLoadFailed = false
             requestedEffect = .installModel
         case .acknowledgeReady:
             preferences.dismissedReady = true
@@ -567,7 +581,12 @@ final class SetupCoordinator {
 
         clearStaleReadyPreferenceIfNeeded()
         let decision = SetupPolicy.decision(for: facts)
-        var nextStep = intent == .retryInstall ? SetupFlowStep.preparing : decision.step
+        var nextStep: SetupFlowStep
+        if retainedLoadFailed, modelManager.state.isInstalled {
+            nextStep = .failed
+        } else {
+            nextStep = intent == .retryInstall ? .preparing : decision.step
+        }
         if awaitingSignInContinue,
            facts.isAuthenticated,
            intent != .continueSignIn,
@@ -588,7 +607,7 @@ final class SetupCoordinator {
             TimbreLog.line("Timbre onboarding: step \(previousStep) → \(step)")
         }
 
-        let effect = requestedEffect ?? decision.effect
+        let effect = retainedLoadFailed ? .none : (requestedEffect ?? decision.effect)
         if effect != .none {
             start(effect)
         }
@@ -631,12 +650,26 @@ final class SetupCoordinator {
             let currentFacts = facts
             guard currentFacts.completedShortcutOnboarding,
                   currentFacts.microphone == .granted,
-                  currentFacts.accessibility == .trusted,
-                  !modelManager.state.isInstalled
+                  currentFacts.accessibility == .trusted
             else {
                 return
             }
-            try? await modelManager.ensureInstalled()
+            do {
+                if !modelManager.state.isInstalled {
+                    try await modelManager.ensureInstalled()
+                }
+                // An existing cache can still require Core ML to specialize
+                // the encoder for this Mac. Retain it before showing Ready.
+                if modelManager.state.isInstalled, !modelManager.state.isLoaded {
+                    try await modelManager.loadInstalledAndRetain()
+                }
+                retainedLoadFailed = false
+            } catch {
+                // A retained-load failure can intentionally leave the disk
+                // state installed. Avoid an automatic retry loop; the existing
+                // failure screen gives the user an explicit retry instead.
+                retainedLoadFailed = modelManager.state.isInstalled
+            }
         }
     }
 

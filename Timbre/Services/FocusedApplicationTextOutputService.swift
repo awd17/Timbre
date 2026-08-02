@@ -296,6 +296,7 @@ final class FocusedApplicationTextOutputService: TranscriptDeliveryServicing {
             )
             return .copiedAfterInsertFailure(.eventPostFailed)
         }
+        transcriptPasteboard.pasteWasPosted(for: write)
 
         return .pasteEventPosted
     }

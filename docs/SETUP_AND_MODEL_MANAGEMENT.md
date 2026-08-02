@@ -36,7 +36,7 @@ ParakeetModelManager
 
 Views must not import FluidAudio.
 
-Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` must not request the microphone, download files, or load the model. Setup owns `ensureInstalled()`. After readiness, `ParakeetPrewarmCoordinator` owns proactive `loadInstalledAndRetain()`. Dictation Start owns `ensureLoaded()` (may join prewarm).
+Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` must not request the microphone, download files, or load the model. Setup owns `ensureInstalled()`. `ParakeetPrewarmCoordinator` owns proactive `loadInstalledAndRetain()`, starting as soon as the model is on disk (independent of permission readiness). Production does not register the dictation hotkey until that retained load completes. Dictation Start calls `ensureLoaded()` as a fast invariant/reuse check; Stop never inherits launch compilation.
 
 ### Installed vs loaded
 
@@ -51,6 +51,8 @@ Launch construction of `ParakeetModelManager` / `ParakeetTranscriptionService` m
 
 - **Onboarding** calls `ensureInstalled()`: download → verify load → **release** manager → `installed`.
 - **Prewarming** calls `loadInstalledAndRetain()`: load from disk only, **retain**, never download.
+  Starts as soon as the model is on disk (no microphone/Accessibility gate) so the cold Core ML/ANE
+  compile happens during first-run setup instead of stalling the first dictation.
 - **Production Parakeet dictation** calls `ensureLoaded()`: load (download if needed) and **retain** while useful.
 
 Loading an existing cache into memory leaves the public lifecycle at `installed` until the retained
@@ -91,9 +93,10 @@ Welcome → Shortcut → Microphone → Text Insertion → Preparing → Ready
 5. Existing users with the model already installed skip redownload; they may still see shortcut confirmation or permission recovery.
 6. After shortcut confirmation and both permissions are trusted, install starts automatically (no second Download button).
 7. Progress UI shows a determinate bar mapped from FluidAudio callbacks (monotonic overall fraction), percent, and an ETA when enough progress exists.
-8. Closing the window does not cancel preparation; the menu-bar app keeps running.
-9. Quit ends the process; the next launch re-probes the **cache**, not a stale Boolean.
-10. Prefs alone never prove the model is installed or that Accessibility is trusted.
+8. When the model finishes installing, Timbre **loads it into memory inside this same "Preparing" step**. This hides the cold Core ML/ANE compile (~10-15s on a fresh bundle) behind onboarding so the very first dictation after Ready is warm instead of stalling in its own Preparing phase.
+9. Closing the window does not cancel preparation; the menu-bar app keeps running.
+10. Quit ends the process; the next launch re-probes the **cache**, not a stale Boolean.
+11. Prefs alone never prove the model is installed or that Accessibility is trusted.
 
 ### Setup readiness vs clipboard fallback
 

@@ -76,6 +76,10 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
     let shortcutState: KeyboardShortcutsOnboardingAdapter
     let shortcutRecorderName: KeyboardShortcuts.Name
 
+    private let requiresLoadedModelBeforeShortcut: Bool
+    private let skipsGlobalShortcut: Bool
+    private let transcription: any TranscriptionServicing
+
     private var debugWindow: NSWindow?
     #if DEBUG
     private var debugWindowCloseDelegate: DebugWindowCloseDelegate?
@@ -92,6 +96,7 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             preferences: appPreferences,
             inputDevices: audioInputDevices,
             setupCoordinator: setupCoordinator,
+            requiresLoadedModelBeforeShortcut: requiresLoadedModelBeforeShortcut,
             authentication: authenticationController,
             onOpenSetup: { [weak self] in
                 self?.presentSetupWindow()
@@ -253,11 +258,19 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         modelManager = selectedModelManager
+        transcription = selectedTranscription
         setupCoordinator = selectedSetupCoordinator
         shortcutRecorderName = selectedShortcutName
         self.shortcutState = selectedShortcutState
         appPreferences = selectedAppPreferences
         audioInputDevices = selectedAudioInputDevices
+        let disableModelPrewarm = Self.shouldDisableModelPrewarm(arguments: arguments)
+        let skipsGlobalShortcut = Self.shouldSkipGlobalShortcut(arguments: arguments)
+        let requiresLoadedModelBeforeShortcut = shouldConfigurePrewarm
+            && isProductionBackendForPrewarm
+            && !disableModelPrewarm
+        self.skipsGlobalShortcut = skipsGlobalShortcut
+        self.requiresLoadedModelBeforeShortcut = requiresLoadedModelBeforeShortcut
         let playbackController = DictationPlaybackController(
             preferences: selectedAppPreferences,
             defaults: selectedAppPreferences.defaults
@@ -288,33 +301,76 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             playback: playbackController,
             performanceReporter: performanceReporter
         )
-        dictationIndicatorCoordinator = DictationIndicatorWindowController(
+        let selectedIndicatorCoordinator = DictationIndicatorWindowController(
             controller: controller,
             placementStore: DictationIndicatorPlacementStore(
                 defaults: selectedAppPreferences.defaults
             )
         )
-        shortcutCoordinator = DictationShortcutCoordinator(
+        dictationIndicatorCoordinator = selectedIndicatorCoordinator
+        let selectedShortcutCoordinator = DictationShortcutCoordinator(
             controller: controller,
             setupCoordinator: selectedSetupCoordinator,
             shortcutService: selectedShortcutService
         )
+        shortcutCoordinator = selectedShortcutCoordinator
 
         if shouldConfigurePrewarm, let selectedSetupCoordinator {
-            let prewarmCoordinator = ParakeetPrewarmCoordinator(
+            var prewarmCoordinator: ParakeetPrewarmCoordinator?
+            prewarmCoordinator = ParakeetPrewarmCoordinator(
                 modelManager: selectedModelManager,
-                isEligible: { [weak selectedSetupCoordinator] in
-                    selectedSetupCoordinator?.allowsDictation == true
+                isEligible: { [weak selectedModelManager] in
+                    // Loading the model into memory needs no microphone or
+                    // Accessibility permission. Prewarm as soon as the model is
+                    // on disk so the cold Core ML/ANE compile happens in the
+                    // background during first-run setup instead of stalling the
+                    // first dictation's Preparing phase (~35s on a fresh bundle).
+                    switch selectedModelManager?.state {
+                    case .installed, .loaded:
+                        return true
+                    case .checking, .notInstalled, .downloading, .loading, .failed, nil:
+                        return false
+                    }
                 },
                 isParakeetProductionBackend: isProductionBackendForPrewarm,
-                disablePrewarm: Self.shouldDisableModelPrewarm(arguments: arguments),
-                onModelStateChanged: { [weak selectedSetupCoordinator] in
+                disablePrewarm: disableModelPrewarm,
+                onModelStateChanged: {
+                    [weak selectedSetupCoordinator, weak prewarmCoordinator,
+                     weak selectedModelManager, weak selectedShortcutCoordinator,
+                     weak selectedTranscription, weak selectedIndicatorCoordinator] in
                     selectedSetupCoordinator?.modelPreparationDidChange()
+                    // The model can become installed without a readiness
+                    // transition (e.g. download finished in the background after
+                    // the user closed setup), so re-evaluate on every model
+                    // state change too.
+                    prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
+                    if let modelState = selectedModelManager?.state,
+                       Self.shouldStartShortcutAfterPrewarmCompletion(
+                           requiresLoadedModelBeforeShortcut: requiresLoadedModelBeforeShortcut,
+                           skipsGlobalShortcut: skipsGlobalShortcut,
+                           modelState: modelState,
+                           setupIsComplete: selectedSetupCoordinator?.settingsAreUnlocked == true
+                       ) {
+                        selectedIndicatorCoordinator?.prewarmSessionInfrastructure()
+                        Self.prewarmInputIfSupported(selectedTranscription)
+                        selectedShortcutCoordinator?.start()
+                    }
                 }
             )
             self.prewarmCoordinator = prewarmCoordinator
-            selectedSetupCoordinator.onReadinessChanged = { [weak prewarmCoordinator] _ in
+            selectedSetupCoordinator.onReadinessChanged = {
+                [weak prewarmCoordinator, weak selectedModelManager,
+                 weak selectedShortcutCoordinator, weak selectedTranscription,
+                 weak selectedIndicatorCoordinator] _ in
                 prewarmCoordinator?.evaluate(source: .setupReadinessChanged)
+                if requiresLoadedModelBeforeShortcut,
+                   !skipsGlobalShortcut,
+                   selectedModelManager?.state.isLoaded == true
+                {
+                    selectedIndicatorCoordinator?.prewarmSessionInfrastructure()
+                    Self.prewarmInputIfSupported(selectedTranscription)
+                    selectedShortcutCoordinator?.start()
+                }
             }
         } else {
             prewarmCoordinator = nil
@@ -359,10 +415,16 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
         )
         #endif
 
-        if !Self.shouldSkipGlobalShortcut(arguments: ProcessInfo.processInfo.arguments) {
-            shortcutCoordinator.start()
-        } else {
+        if skipsGlobalShortcut {
             TimbreLog.line("Timbre shortcut: skipped (--parakeet-fixture)")
+        } else if requiresLoadedModelBeforeShortcut, !modelManager.state.isLoaded {
+            TimbreLog.line("Timbre shortcut: deferred until launch model prewarm completes.")
+        } else {
+            if requiresLoadedModelBeforeShortcut {
+                dictationIndicatorCoordinator.prewarmSessionInfrastructure()
+                Self.prewarmInputIfSupported(transcription)
+            }
+            shortcutCoordinator.start()
         }
 
         if let setupCoordinator, setupCoordinator.shouldAutoPresent {
@@ -486,6 +548,40 @@ final class TimbreAppDelegate: NSObject, NSApplicationDelegate {
             arguments: arguments,
             isDebug: isDebug
         )
+    }
+
+    private static func prewarmInputIfSupported(
+        _ transcription: (any TranscriptionServicing)?
+    ) {
+        guard let prewarming = transcription as? any TranscriptionInputPrewarming else {
+            return
+        }
+        do {
+            try prewarming.prewarmInput()
+        } catch {
+            // Input devices can change or disappear at any time. Dictation's
+            // normal Start path retries setup and owns the user-facing error.
+            TimbreLog.line(
+                "Timbre microphone: background preparation skipped (\(error.localizedDescription))."
+            )
+        }
+    }
+
+    static func shouldStartShortcutAfterPrewarmCompletion(
+        requiresLoadedModelBeforeShortcut: Bool,
+        skipsGlobalShortcut: Bool,
+        modelState: ModelPreparationState,
+        setupIsComplete: Bool
+    ) -> Bool {
+        guard !skipsGlobalShortcut else { return false }
+        guard requiresLoadedModelBeforeShortcut else { return true }
+        if modelState.isLoaded { return true }
+
+        // A returning user must not lose their shortcut for the entire launch
+        // after a transient retained-load failure. `installed` is sufficient
+        // for the normal dictation path to retry `ensureLoaded()`. First-run
+        // setup still waits for a successful retained load before unlocking.
+        return modelState.isInstalled && setupIsComplete
     }
 
     private static func shouldDisableModelPrewarm(arguments: [String]) -> Bool {

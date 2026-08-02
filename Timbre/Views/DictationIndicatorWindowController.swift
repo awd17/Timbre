@@ -127,8 +127,10 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
     private var dismissalTask: Task<Void, Never>?
     private var phaseTransitionTask: Task<Void, Never>?
     private var screenObserver: NSObjectProtocol?
-    private var localEscapeMonitor: Any?
-    private var globalEscapeMonitor: Any?
+    private lazy var escapeKeyInterceptor = EscapeKeyInterceptor { [weak self] in
+        guard let self, self.controller.canCancel else { return }
+        self.controller.cancelDictation()
+    }
     private var isSessionVisible = false
     private var isApplyingFrame = false
     private var isObserving = false
@@ -149,7 +151,11 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         controller.setSessionStateHandler { [weak self] state in
             self?.reconcile(state)
         }
-        startEscapeMonitoring()
+        controller.setDeliveryWillBeginHandler { [weak self] in
+            // Keep Escape active throughout model inference, then get the event
+            // tap out of the keyboard path before delivery posts Command-V.
+            self?.escapeKeyInterceptor.stop()
+        }
         warmUpPanel()
         reconcile(controller.sessionState)
         screenObserver = NotificationCenter.default.addObserver(
@@ -166,11 +172,12 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
     func stop() {
         isObserving = false
         controller.setSessionStateHandler(nil)
+        controller.setDeliveryWillBeginHandler(nil)
         dismissalTask?.cancel()
         dismissalTask = nil
         phaseTransitionTask?.cancel()
         phaseTransitionTask = nil
-        stopEscapeMonitoring()
+        escapeKeyInterceptor.shutdown()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
@@ -178,44 +185,8 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
     }
 
-    private func startEscapeMonitoring() {
-        localEscapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
-            [weak self] event in
-            guard Self.isEscapeKeyDown(event) else { return event }
-            self?.cancelFromEscape()
-            // Let the focused control finish handling Escape as well (for example,
-            // the onboarding shortcut recorder), while cancellation runs on the
-            // main actor immediately after this event is observed.
-            return event
-        }
-
-        globalEscapeMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) {
-            [weak self] event in
-            guard Self.isEscapeKeyDown(event) else { return }
-            self?.cancelFromEscape()
-        }
-    }
-
-    private func cancelFromEscape() {
-        Task { @MainActor [weak self] in
-            guard let self, self.controller.canCancel else { return }
-            self.controller.cancelDictation()
-        }
-    }
-
-    private func stopEscapeMonitoring() {
-        if let localEscapeMonitor {
-            NSEvent.removeMonitor(localEscapeMonitor)
-        }
-        localEscapeMonitor = nil
-        if let globalEscapeMonitor {
-            NSEvent.removeMonitor(globalEscapeMonitor)
-        }
-        globalEscapeMonitor = nil
-    }
-
-    private static func isEscapeKeyDown(_ event: NSEvent) -> Bool {
-        event.keyCode == 53 && !event.isARepeat
+    func prewarmSessionInfrastructure() {
+        _ = escapeKeyInterceptor.prepare()
     }
 
     func resetPlacement() {
@@ -242,8 +213,10 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
         let presentation = DictationIndicatorPresentation.presentation(for: state)
         switch state {
         case .idle:
+            escapeKeyInterceptor.stop()
             hide()
         case .preparing:
+            escapeKeyInterceptor.start()
             isSessionVisible = true
             present(presentation)
             // Measure the minimum dwell from the moment the indicator has
@@ -251,13 +224,16 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
             // should not consume the preparing state's visible time.
             preparingPresentedAt = DispatchTime.now().uptimeNanoseconds
         case .listening:
+            escapeKeyInterceptor.start()
             isSessionVisible = true
             presentListeningAfterPreparingDwell()
         case .finishing:
+            escapeKeyInterceptor.start()
             guard isSessionVisible else { return }
             preparingPresentedAt = nil
             present(presentation)
         case .completed:
+            escapeKeyInterceptor.stop()
             guard isSessionVisible else { return }
             guard presentation != .hidden else {
                 hide()
@@ -269,6 +245,7 @@ final class DictationIndicatorWindowController: NSObject, NSWindowDelegate {
                 : .milliseconds(1500)
             presentResult(presentation, duration: duration)
         case .failed:
+            escapeKeyInterceptor.stop()
             guard isSessionVisible else { return }
             guard presentation != .hidden else {
                 hide()

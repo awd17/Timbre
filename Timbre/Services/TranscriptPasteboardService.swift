@@ -47,6 +47,7 @@ protocol TranscriptPasteboardServicing: AnyObject {
         onOutcome: @escaping (ClipboardRetentionOutcome) -> Void
     ) -> TrackedTranscriptWrite?
     func isCurrentWriteUnchanged(_ write: TrackedTranscriptWrite) -> Bool
+    func pasteWasPosted(for write: TrackedTranscriptWrite)
     func cancelRestoration(
         for write: TrackedTranscriptWrite,
         outcome: ClipboardRetentionOutcome
@@ -60,10 +61,8 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
     private struct PendingTransaction {
         let write: TrackedTranscriptWrite
         let snapshot: PasteboardSnapshot
-        let provider: TranscriptPasteboardDataProvider
         let onOutcome: (ClipboardRetentionOutcome) -> Void
-        var expectedChangeCount: Int
-        var wasConsumed = false
+        var restorationScheduled = false
     }
 
     private let pasteboard: NSPasteboard
@@ -72,7 +71,7 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
 
     init(
         pasteboard: NSPasteboard = .general,
-        restorationGracePeriod: Duration = .milliseconds(150)
+        restorationGracePeriod: Duration = .milliseconds(500)
     ) {
         self.pasteboard = pasteboard
         self.restorationGracePeriod = restorationGracePeriod
@@ -117,14 +116,8 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
 
         if let restorationSnapshot {
             let identifier = UUID()
-            let provider = TranscriptPasteboardDataProvider(
-                transcript: transcript,
-                identifier: identifier,
-                pasteboard: pasteboard,
-                owner: self
-            )
             let item = NSPasteboardItem()
-            guard item.setDataProvider(provider, forTypes: [.string]) else {
+            guard item.setString(transcript, forType: .string) else {
                 return nil
             }
             pasteboard.clearContents()
@@ -138,9 +131,7 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
             transactions[identifier] = PendingTransaction(
                 write: write,
                 snapshot: restorationSnapshot,
-                provider: provider,
-                onOutcome: onOutcome,
-                expectedChangeCount: write.changeCount
+                onOutcome: onOutcome
             )
             return write
         }
@@ -162,6 +153,26 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
         pasteboard.changeCount == write.changeCount
     }
 
+    func pasteWasPosted(for write: TrackedTranscriptWrite) {
+        guard var transaction = transactions[write.identifier],
+              !transaction.restorationScheduled
+        else {
+            return
+        }
+        transaction.restorationScheduled = true
+        transactions[write.identifier] = transaction
+
+        Task { @MainActor [weak self] in
+            // CGEvent posting is asynchronous. Keep the eager plain-text value
+            // available while the destination app handles Command-V, then
+            // restore only if nobody else has changed the clipboard.
+            if let restorationGracePeriod = self?.restorationGracePeriod {
+                try? await Task.sleep(for: restorationGracePeriod)
+            }
+            self?.restoreAfterPaste(identifier: write.identifier)
+        }
+    }
+
     func cancelRestoration(
         for write: TrackedTranscriptWrite,
         outcome: ClipboardRetentionOutcome
@@ -174,54 +185,11 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
         log(outcome)
     }
 
-    fileprivate func transcriptWasRequested(identifier: UUID, changeCount: Int) {
-        guard var transaction = transactions[identifier] else { return }
-        transaction.wasConsumed = true
-        // AppKit may advance the generation when it materializes promised data.
-        // Capture that generation at the point of consumption so the later
-        // restoration still rejects any subsequent external clipboard write.
-        transaction.expectedChangeCount = changeCount
-        transactions[identifier] = transaction
-
-        Task { @MainActor [weak self] in
-            // Some editors inspect the promised value before committing the
-            // paste on a later run-loop turn. Keep it available briefly, then
-            // re-check ownership before restoring.
-            if let restorationGracePeriod = self?.restorationGracePeriod {
-                try? await Task.sleep(for: restorationGracePeriod)
-            }
-            self?.restoreAfterConsumption(identifier: identifier)
-        }
-    }
-
-    fileprivate func providerFinished(identifier: UUID) {
-        // AppKit can report provider completion reentrantly while the promised
-        // value is being materialized. Give the consumption callback one main
-        // actor turn to mark the transaction before treating this as lost
-        // ownership.
-        Task { @MainActor [weak self] in
-            await Task.yield()
-            self?.finishProviderIfUnconsumed(identifier: identifier)
-        }
-    }
-
-    private func finishProviderIfUnconsumed(identifier: UUID) {
-        guard let transaction = transactions[identifier],
-              !transaction.wasConsumed
-        else {
-            return
-        }
-        transactions.removeValue(forKey: identifier)
-        let outcome = ClipboardRetentionOutcome.restorationSkipped(.clipboardChanged)
-        transaction.onOutcome(outcome)
-        log(outcome)
-    }
-
-    private func restoreAfterConsumption(identifier: UUID) {
+    private func restoreAfterPaste(identifier: UUID) {
         guard let transaction = transactions.removeValue(forKey: identifier) else {
             return
         }
-        guard pasteboard.changeCount == transaction.expectedChangeCount else {
+        guard pasteboard.changeCount == transaction.write.changeCount else {
             let outcome = ClipboardRetentionOutcome.restorationSkipped(.clipboardChanged)
             transaction.onOutcome(outcome)
             log(outcome)
@@ -261,50 +229,6 @@ final class TranscriptPasteboardService: TranscriptPasteboardServicing {
             TimbreLog.line(
                 "Timbre clipboard: insertion failed; transcript retained (\(reason))"
             )
-        }
-    }
-}
-
-private final class TranscriptPasteboardDataProvider:
-    NSObject,
-    NSPasteboardItemDataProvider
-{
-    private let transcript: String
-    private let identifier: UUID
-    private let pasteboard: NSPasteboard
-    private weak var owner: TranscriptPasteboardService?
-
-    init(
-        transcript: String,
-        identifier: UUID,
-        pasteboard: NSPasteboard,
-        owner: TranscriptPasteboardService
-    ) {
-        self.transcript = transcript
-        self.identifier = identifier
-        self.pasteboard = pasteboard
-        self.owner = owner
-    }
-
-    nonisolated func pasteboard(
-        _ pasteboard: NSPasteboard?,
-        item: NSPasteboardItem,
-        provideDataForType type: NSPasteboard.PasteboardType
-    ) {
-        guard type == .string else { return }
-        item.setString(transcript, forType: .string)
-        let materializedChangeCount = self.pasteboard.changeCount
-        Task { @MainActor [weak owner] in
-            owner?.transcriptWasRequested(
-                identifier: identifier,
-                changeCount: materializedChangeCount
-            )
-        }
-    }
-
-    nonisolated func pasteboardFinishedWithDataProvider(_ pasteboard: NSPasteboard) {
-        Task { @MainActor [weak owner] in
-            owner?.providerFinished(identifier: identifier)
         }
     }
 }

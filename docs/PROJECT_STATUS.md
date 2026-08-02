@@ -44,7 +44,7 @@ The UI and the controller do not depend on a specific speech engine.
 - Dictation readiness requires installed model, granted microphone, Accessibility trust, and initial shortcut confirmation; a shortcut may later be cleared without reopening onboarding
 - **Global dictation shortcut** (temporary default ⌃⇧D via KeyboardShortcuts 2.4.0; onboarding Recorder; toggle Start/Stop)
 - **Native Settings** with shared shortcut editing, Dock visibility, safe clipboard-retention policy, and About information
-- **Model prewarming** after setup readiness (`loadInstalledAndRetain`; never downloads; Start joins single-flight load)
+- **Model prewarming** as soon as the model is installed (`loadInstalledAndRetain`; never downloads; production hotkey registers only after the retained load completes)
 - **Onboarding visual polish** (branded setup window + background asset)
 - **Unified full-app integration lifecycle** (one UI test method; build once and relaunch the same binary)
 

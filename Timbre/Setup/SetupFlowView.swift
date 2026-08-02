@@ -490,7 +490,7 @@ struct SetupFlowView: View {
         let progress = coordinator.preparationProgress
         return stepScaffold(
             title: "Getting Timbre ready",
-            subtitle: "Timbre needs to download an additional component before you can start dictating.",
+            subtitle: "Timbre is downloading and optimizing its speech model for this Mac.",
             hero: { symbolHero("arrow.down.circle") },
             content: {
                 VStack(spacing: 10) {

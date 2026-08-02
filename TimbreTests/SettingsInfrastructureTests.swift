@@ -309,7 +309,7 @@ final class DebugWindowCloseDelegateTests: XCTestCase {
 
 @MainActor
 final class TranscriptPasteboardServiceTests: XCTestCase {
-    func testConsumedTranscriptRestoresAllPreviousRepresentations() async {
+    func testConsumedTranscriptRestoresAllPreviousRepresentations() async throws {
         let pasteboard = NSPasteboard.withUniqueName()
         let first = NSPasteboardItem()
         first.setString("prior", forType: .string)
@@ -334,6 +334,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
         XCTAssertNotNil(write)
 
         XCTAssertEqual(pasteboard.string(forType: .string), "transcript")
+        service.pasteWasPosted(for: try XCTUnwrap(write))
         await waitUntil { outcomes == [.previousClipboardRestored] }
 
         guard let restored = pasteboard.pasteboardItems else {
@@ -348,7 +349,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
         XCTAssertEqual(restored.last?.string(forType: .string), "second")
     }
 
-    func testNewerClipboardChangeIsNotOverwritten() async {
+    func testNewerClipboardChangeIsNotOverwritten() async throws {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         pasteboard.setString("prior", forType: .string)
@@ -365,6 +366,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
         )
         XCTAssertNotNil(write)
 
+        service.pasteWasPosted(for: try XCTUnwrap(write))
         pasteboard.clearContents()
         pasteboard.setString("newer", forType: .string)
         await waitUntil { !outcomes.isEmpty }
@@ -373,7 +375,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
         XCTAssertEqual(outcomes, [.restorationSkipped(.clipboardChanged)])
     }
 
-    func testEmptySnapshotRestoresEmptyClipboard() async {
+    func testEmptySnapshotRestoresEmptyClipboard() async throws {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()
         let service = TranscriptPasteboardService(pasteboard: pasteboard)
@@ -381,7 +383,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
             return XCTFail("Expected snapshot")
         }
         var outcome: ClipboardRetentionOutcome?
-        _ = service.writeTranscript(
+        let write = service.writeTranscript(
             "transcript",
             restorationSnapshot: snapshot,
             retainedOutcome: .transcriptIntentionallyRetained,
@@ -389,6 +391,7 @@ final class TranscriptPasteboardServiceTests: XCTestCase {
         )
 
         XCTAssertEqual(pasteboard.string(forType: .string), "transcript")
+        service.pasteWasPosted(for: try XCTUnwrap(write))
         await waitUntil { outcome == .previousClipboardRestored }
         XCTAssertTrue(pasteboard.pasteboardItems?.isEmpty ?? true)
     }

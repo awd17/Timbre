@@ -3,7 +3,11 @@ import Foundation
 
 /// Production Parakeet v2 batch transcription via FluidAudio.
 @MainActor
-final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHandling {
+final class ParakeetTranscriptionService:
+    TranscriptionServicing,
+    TranscriptionInputPrewarming,
+    TerminationHandling
+{
     private static let targetSampleRate = 16_000.0
 
     private let audioSource: any ParakeetAudioSource
@@ -36,6 +40,11 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
 #endif
     }
 
+    func prewarmInput() throws {
+        guard session == nil else { return }
+        try audioSource.prewarm()
+    }
+
     func start(
         onPartialResult: @escaping @MainActor (String) -> Void,
         onAudioLevel: @escaping @MainActor (Float) -> Void
@@ -44,7 +53,6 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
             throw TranscriptionError.alreadyRunning
         }
 
-        tearDownSession(invalidateSession: true)
         session = TranscriptionSession(onPartialResult: onPartialResult)
 
         do {
@@ -84,7 +92,9 @@ final class ParakeetTranscriptionService: TranscriptionServicing, TerminationHan
         TimbreLog.line("Timbre Parakeet: synchronous termination shutdown.")
         inferenceTask?.cancel()
         inferenceTask = nil
-        tearDownSession(invalidateSession: true)
+        session?.invalidate(resumeWithCancellation: true)
+        session = nil
+        audioSource.shutdown()
         // Shared model preparation is intentionally not cancelled.
     }
 

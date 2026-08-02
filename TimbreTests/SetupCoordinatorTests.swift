@@ -254,6 +254,25 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { coordinator.step == .ready }
     }
 
+    func testExistingCacheStaysInPreparingUntilRetainedLoadFinishes() async {
+        defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        model.suspendsRetainLoad = true
+
+        let coordinator = makeCoordinator(model: model)
+        await model.waitForRetainLoadStart()
+
+        XCTAssertEqual(coordinator.step, .preparing)
+        XCTAssertEqual(model.ensureInstalledCallCount, 0)
+        XCTAssertEqual(model.loadInstalledAndRetainCallCount, 1)
+
+        model.resumeRetainLoad()
+        await waitUntil { coordinator.step == .ready }
+
+        XCTAssertEqual(model.state, .loaded)
+    }
+
     func testMissingShortcutAfterCompletedSetupReturnsToShortcutRecovery() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
@@ -304,7 +323,48 @@ final class SetupCoordinatorTests: XCTestCase {
         model.resumeInstallation()
         await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertEqual(model.state, .installed)
+        XCTAssertEqual(model.state, .loaded)
+    }
+
+    /// The first-ever setup must trigger background model prewarming the moment
+    /// it becomes ready, exactly as `TimbreAppDelegate` wires it. If this wiring
+    /// breaks, the first dictation after a fresh install loads the model inline
+    /// (cold Core ML/ANE compile), which is what makes it take ~35s to start.
+    func testFirstEverSetupCompletionTriggersPrewarm() async {
+        let model = FakeParakeetModelManager(initialState: .notInstalled)
+        model.suspendsInstallation = true
+        let coordinator = makeCoordinator(
+            model: model,
+            microphone: FakeMicrophonePermission(status: .granted)
+        )
+        let prewarm = ParakeetPrewarmCoordinator(
+            modelManager: model,
+            isEligible: { coordinator.allowsDictation },
+            isParakeetProductionBackend: true
+        )
+        // Launch readiness is evaluated before setup is eligible.
+        prewarm.evaluate(source: .launchReadiness)
+        XCTAssertEqual(model.loadInstalledAndRetainCallCount, 0)
+
+        coordinator.onReadinessChanged = { [weak prewarm] _ in
+            prewarm?.evaluate(source: .setupReadinessChanged)
+        }
+
+        advanceThroughWelcomeAndShortcut(coordinator)
+        await model.waitForInstallStart()
+        XCTAssertEqual(coordinator.step, .preparing)
+
+        model.resumeInstallation()
+        await waitUntil { coordinator.step == .ready }
+        await waitUntil { model.state == .loaded }
+
+        // Both the onboarding install step and the readiness-triggered prewarm
+        // load the model into memory; the real manager single-flights them.
+        XCTAssertGreaterThanOrEqual(
+            model.loadInstalledAndRetainCallCount,
+            1,
+            "The model must be loaded into memory by the time first-run setup is ready."
+        )
     }
 
     func testMicDeniedDoesNotInstall() async {
@@ -318,6 +378,34 @@ final class SetupCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(coordinator.step, .microphoneDenied)
         XCTAssertEqual(model.ensureInstalledCallCount, 0)
+    }
+
+    /// Prewarm must begin at launch as soon as the model is on disk, even when
+    /// setup is still incomplete (no shortcut confirmation, no microphone or
+    /// Accessibility permission yet). This is what `TimbreAppDelegate` wires:
+    /// loading the model into memory needs none of those gates, and starting it
+    /// during first-run setup hides the ~35s cold Core ML/ANE compile so the
+    /// first dictation after Ready is not stalled by it.
+    func testPrewarmStartsAtLaunchWhenModelInstalledEvenIfSetupIncomplete() async {
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let mic = FakeMicrophonePermission(status: .undetermined)
+        let coordinator = makeCoordinator(model: model, microphone: mic)
+        XCTAssertFalse(coordinator.allowsDictation, "Setup should not be dictation-ready.")
+
+        let prewarm = ParakeetPrewarmCoordinator(
+            modelManager: model,
+            isEligible: { model.state.isInstalled },
+            isParakeetProductionBackend: true
+        )
+
+        prewarm.evaluate(source: .launchReadiness)
+        await waitUntil { model.state == .loaded }
+
+        XCTAssertEqual(
+            model.loadInstalledAndRetainCallCount,
+            1,
+            "Prewarm must start at launch when the model is installed, before setup completes."
+        )
     }
 
     func testDeniedWaitsForExplicitRetry() async {
@@ -389,7 +477,7 @@ final class SetupCoordinatorTests: XCTestCase {
         coordinator.retryAfterFailure()
         await waitUntil { coordinator.step == .ready }
         XCTAssertEqual(coordinator.step, .ready)
-        XCTAssertEqual(model.state, .installed)
+        XCTAssertEqual(model.state, .loaded)
     }
 
     func testInstalledCacheWithoutShortcutConfirmationShowsShortcut() {
@@ -401,7 +489,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testExistingUserShortcutOnlyThenReady() {
         defaults.set(true, forKey: SetupCoordinator.completedWelcomeKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         XCTAssertEqual(coordinator.step, .shortcut)
         confirmShortcut(coordinator)
@@ -414,7 +502,9 @@ final class SetupCoordinatorTests: XCTestCase {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
         defaults.set(true, forKey: SetupCoordinator.dismissedReadyKey)
         let model = FakeParakeetModelManager(initialState: .installed)
-        model.retainLoadBehavior = .missing
+        // Prewarm's first retained load reports a missing cache; the setup's
+        // repair install then loads the repaired cache successfully.
+        model.retainLoadOutcomes = [.missing, .success, .success]
         let coordinator = makeCoordinator(model: model)
         let prewarm = ParakeetPrewarmCoordinator(
             modelManager: model,
@@ -427,9 +517,8 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil { model.ensureInstalledCallCount == 1 }
         await waitUntil { coordinator.step == .ready }
 
-        XCTAssertEqual(model.loadInstalledAndRetainCallCount, 1)
         XCTAssertEqual(model.installOperationCount, 1)
-        XCTAssertEqual(model.state, .installed)
+        XCTAssertEqual(model.state, .loaded)
     }
 
     func testDismissedReadyDoesNotAutoPresent() {
@@ -600,7 +689,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testRecheckTextInsertionPromptsForSystemSettingsWhenStillDenied() async {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
@@ -628,7 +717,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testTryAgainReregistersAndAdvancesWhenAccessibilityBecomesTrusted() async {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let accessibility = FakeAccessibilityPermission(
             trustState: .notTrusted,
             hasOfferedPrompt: true
@@ -648,7 +737,7 @@ final class SetupCoordinatorTests: XCTestCase {
     @MainActor
     func testSettingsStayLockedUntilReadyWindowAcknowleged() {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         // model ready, permissions granted, but user has not dismissed ready window
         XCTAssertEqual(coordinator.step, .ready)
@@ -758,7 +847,7 @@ final class SetupCoordinatorTests: XCTestCase {
 
     func testAcknowledgeReadyPersistsDismissal() {
         defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
-        let model = FakeParakeetModelManager(initialState: .installed)
+        let model = FakeParakeetModelManager(initialState: .loaded)
         let coordinator = makeCoordinator(model: model)
         coordinator.acknowledgeReadyAndDismiss()
         XCTAssertTrue(defaults.bool(forKey: SetupCoordinator.dismissedReadyKey))
@@ -804,7 +893,7 @@ final class SetupCoordinatorTests: XCTestCase {
         coordinator.markWindowVisible(false)
         model.resumeInstallation()
         await waitUntil { coordinator.step == .ready }
-        XCTAssertEqual(model.state, .installed)
+        XCTAssertEqual(model.state, .loaded)
         XCTAssertEqual(coordinator.step, .ready)
     }
 
@@ -815,7 +904,7 @@ final class SetupCoordinatorTests: XCTestCase {
             displayString: "⌃⌥D"
         )
         let coordinator = makeCoordinator(
-            model: FakeParakeetModelManager(initialState: .installed),
+            model: FakeParakeetModelManager(initialState: .loaded),
             shortcut: shortcut
         )
         XCTAssertEqual(coordinator.step, .ready)

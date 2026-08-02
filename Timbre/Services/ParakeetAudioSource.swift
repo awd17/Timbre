@@ -7,10 +7,17 @@ import Foundation
 protocol ParakeetAudioSource: AnyObject {
     var diagnosticLabel: String { get }
     func prepareAccess() async throws
+    func prewarm() throws
     func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws
     /// Stop capture if any, then return an immutable sample snapshot.
     func finish() throws -> [Float]
     func teardown()
+    func shutdown()
+}
+
+extension ParakeetAudioSource {
+    func prewarm() throws {}
+    func shutdown() { teardown() }
 }
 
 // MARK: - Microphone
@@ -47,8 +54,12 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
         }
     }
 
+    func prewarm() throws {
+        try capturer.prepare()
+    }
+
     func begin(onAudioLevel: @escaping @MainActor (Float) -> Void) throws {
-        teardown()
+        capture.clear()
 
         let captureBuffer = capture
         do {
@@ -80,6 +91,11 @@ final class ParakeetMicrophoneAudioSource: ParakeetAudioSource {
 
     func teardown() {
         capturer.stop()
+        capture.clear()
+    }
+
+    func shutdown() {
+        capturer.shutdown()
         capture.clear()
     }
 }

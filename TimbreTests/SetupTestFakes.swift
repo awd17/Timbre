@@ -22,6 +22,9 @@ final class FakeParakeetModelManager: ParakeetModelManaging {
     var ensureInstalledHandler: (() async throws -> Void)?
     var loadInstalledAndRetainHandler: (() async throws -> Void)?
     var retainLoadBehavior: RetainLoadBehavior = .success
+    /// Optional per-call retained-load outcomes. When non-empty the next call
+    /// consumes the first element; otherwise `retainLoadBehavior` applies.
+    var retainLoadOutcomes: [RetainLoadBehavior] = []
     var suspendsInstallation = false
     var suspendsRetainLoad = false
 
@@ -116,7 +119,13 @@ final class FakeParakeetModelManager: ParakeetModelManaging {
             if let loadInstalledAndRetainHandler {
                 try await loadInstalledAndRetainHandler()
             } else {
-                switch retainLoadBehavior {
+                let behavior: RetainLoadBehavior
+                if !retainLoadOutcomes.isEmpty {
+                    behavior = retainLoadOutcomes.removeFirst()
+                } else {
+                    behavior = retainLoadBehavior
+                }
+                switch behavior {
                 case .success:
                     break
                 case .missing:

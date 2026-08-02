@@ -59,7 +59,9 @@ separate Xcode-signed app and has its own permission row.
 4. Press the shortcut again to stop and insert the transcription.
 
 Press `Escape` at any point to cancel the current dictation immediately. Timbre
-discards any speech already detected and inserts nothing.
+discards any speech already detected and inserts nothing. While dictation is
+active, Timbre consumes that Escape press so the app you are typing into does not
+also react to it; outside dictation, Escape behaves normally.
 
 Click the Timbre icon in the menu bar for Settings, setup recovery, your last
 dictation, or Quit. If text cannot be inserted safely, Timbre preserves the

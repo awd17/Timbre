@@ -4,6 +4,7 @@ import Observation
 
 enum DictationPerformanceEvent {
     case startToPreparing(milliseconds: Double)
+    case preparingToListening(milliseconds: Double)
     case startToListening(milliseconds: Double)
     case stopToCompletion(milliseconds: Double)
 }
@@ -29,9 +30,12 @@ final class AssistantController {
     private var transcriptionCleanupTask: Task<Void, Never>?
     private var deliveryCancellation: TranscriptDeliveryCancellationToken?
     private var startRequestedAt: UInt64?
+    private var preparingStartedAt: UInt64?
     private var stopRequestedAt: UInt64?
     private let performanceReporter: @MainActor (DictationPerformanceEvent) -> Void
+    private let uptimeNanoseconds: @MainActor () -> UInt64
     @ObservationIgnored private var sessionStateHandler: ((SessionState) -> Void)?
+    @ObservationIgnored private var deliveryWillBeginHandler: (() -> Void)?
 
     init(
         transcription: TranscriptionServicing,
@@ -39,7 +43,10 @@ final class AssistantController {
         delivery: TranscriptDeliveryServicing,
         targetProvider: any DictationTargetProviding,
         playback: (any DictationPlaybackControlling)? = nil,
-        performanceReporter: @escaping @MainActor (DictationPerformanceEvent) -> Void = { _ in }
+        performanceReporter: @escaping @MainActor (DictationPerformanceEvent) -> Void = { _ in },
+        uptimeNanoseconds: @escaping @MainActor () -> UInt64 = {
+            DispatchTime.now().uptimeNanoseconds
+        }
     ) {
         self.transcription = transcription
         self.clipboard = clipboard
@@ -47,6 +54,7 @@ final class AssistantController {
         self.targetProvider = targetProvider
         self.playback = playback ?? NoOpDictationPlaybackController()
         self.performanceReporter = performanceReporter
+        self.uptimeNanoseconds = uptimeNanoseconds
     }
 
     var liveTranscript: String { sessionState.displayedTranscript }
@@ -58,6 +66,12 @@ final class AssistantController {
 
     func setSessionStateHandler(_ handler: ((SessionState) -> Void)?) {
         sessionStateHandler = handler
+    }
+
+    /// Delivery emits synthetic keyboard events. Keyboard interception used by
+    /// the active session must be removed before this callback returns.
+    func setDeliveryWillBeginHandler(_ handler: (() -> Void)?) {
+        deliveryWillBeginHandler = handler
     }
 
     /// Starts the visible session synchronously, then performs preparation asynchronously.
@@ -92,6 +106,7 @@ final class AssistantController {
         audioLevel = 0
         sessionState = .preparing
         recordStartToPreparingIfNeeded()
+        preparingStartedAt = uptimeNanoseconds()
 
         return Task(priority: .userInitiated) { [weak self] in
             await self?.prepareAndStart(session)
@@ -146,6 +161,7 @@ final class AssistantController {
             }
             // Stop is only available after start succeeds.
             sessionState = .listening(transcript: sessionState.displayedTranscript)
+            recordPreparingToListeningIfNeeded()
             recordStartToListeningIfNeeded()
         } catch {
             guard activeSession?.id == session.id else { return }
@@ -153,6 +169,7 @@ final class AssistantController {
             await transcription.cancel()
             activeSession = nil
             startRequestedAt = nil
+            preparingStartedAt = nil
             audioLevel = 0
             sessionState = .failed(
                 kind: Self.failureKind(for: error),
@@ -169,6 +186,7 @@ final class AssistantController {
         activeSession = nil
         playbackSessionID = nil
         startRequestedAt = nil
+        preparingStartedAt = nil
         stopRequestedAt = nil
         audioLevel = 0
         playback.shutdownForTermination()
@@ -201,6 +219,7 @@ final class AssistantController {
                 return
             }
 
+            deliveryWillBeginHandler?()
             let deliveryCancellation = TranscriptDeliveryCancellationToken()
             self.deliveryCancellation = deliveryCancellation
             let result = await delivery.deliver(
@@ -208,6 +227,7 @@ final class AssistantController {
                 to: session.target,
                 cancellation: deliveryCancellation
             )
+            TimbreLog.line("Timbre delivery: result=\(result)")
             if self.deliveryCancellation === deliveryCancellation {
                 self.deliveryCancellation = nil
             }
@@ -257,6 +277,7 @@ final class AssistantController {
         deliveryCancellation = nil
         activeSession = nil
         startRequestedAt = nil
+        preparingStartedAt = nil
         stopRequestedAt = nil
         audioLevel = 0
         endPlayback(for: session)
@@ -300,7 +321,7 @@ final class AssistantController {
 
     private func recordStartToListeningIfNeeded() {
         guard let startRequestedAt else { return }
-        let milliseconds = Self.elapsedMilliseconds(since: startRequestedAt)
+        let milliseconds = elapsedMilliseconds(since: startRequestedAt)
         self.startRequestedAt = nil
         TimbreLog.line(
             String(format: "Timbre performance: start-to-listening=%.1fms", milliseconds)
@@ -310,16 +331,26 @@ final class AssistantController {
 
     private func recordStartToPreparingIfNeeded() {
         guard let startRequestedAt else { return }
-        let milliseconds = Self.elapsedMilliseconds(since: startRequestedAt)
+        let milliseconds = elapsedMilliseconds(since: startRequestedAt)
         TimbreLog.line(
             String(format: "Timbre performance: start-to-preparing=%.1fms", milliseconds)
         )
         performanceReporter(.startToPreparing(milliseconds: milliseconds))
     }
 
+    private func recordPreparingToListeningIfNeeded() {
+        guard let preparingStartedAt else { return }
+        let milliseconds = elapsedMilliseconds(since: preparingStartedAt)
+        self.preparingStartedAt = nil
+        TimbreLog.line(
+            String(format: "Timbre performance: preparing-to-listening=%.1fms", milliseconds)
+        )
+        performanceReporter(.preparingToListening(milliseconds: milliseconds))
+    }
+
     private func recordStopToCompletionIfNeeded() {
         guard let stopRequestedAt else { return }
-        let milliseconds = Self.elapsedMilliseconds(since: stopRequestedAt)
+        let milliseconds = elapsedMilliseconds(since: stopRequestedAt)
         self.stopRequestedAt = nil
         TimbreLog.line(
             String(format: "Timbre performance: stop-to-completion=%.1fms", milliseconds)
@@ -327,8 +358,8 @@ final class AssistantController {
         performanceReporter(.stopToCompletion(milliseconds: milliseconds))
     }
 
-    private static func elapsedMilliseconds(since start: UInt64) -> Double {
-        let elapsed = DispatchTime.now().uptimeNanoseconds &- start
+    private func elapsedMilliseconds(since start: UInt64) -> Double {
+        let elapsed = uptimeNanoseconds() &- start
         return Double(elapsed) / 1_000_000
     }
 

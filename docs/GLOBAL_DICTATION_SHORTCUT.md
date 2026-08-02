@@ -8,6 +8,9 @@ Developer notes for Timbre’s system-wide Start/Stop hotkey.
 - `Escape` cancels Preparing, Listening, or Processing immediately, restores any
   hotkey-owned playback change, discards captured speech, and never calls text
   delivery for that session.
+- While one of those dictation phases is active, a temporary active CGEvent tap
+  consumes Escape before the frontmost app can react. The tap is removed as soon
+  as dictation ends, so Escape remains untouched for all other app activity.
 - Temporary pre-release default: **Control+Shift+D** (`⌃⇧D`).
 - First-run onboarding presents `KeyboardShortcuts.Recorder` for `.toggleDictation` so the user can confirm or replace the shortcut.
 - Confirmation is tracked separately as `timbre.hasCompletedShortcutOnboarding` (see [`ONBOARDING_UX.md`](ONBOARDING_UX.md)).

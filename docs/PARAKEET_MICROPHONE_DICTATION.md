@@ -53,8 +53,10 @@ Shared `ParakeetModelManager` owns the lifecycle:
 - Cache: `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v2`
 - Constructing the manager/service at launch does **not** download or load the model.
 - Setup calls `ensureInstalled()`: verify then **release** memory.
-- After readiness, `ParakeetPrewarmCoordinator` calls `loadInstalledAndRetain()` (disk only; never downloads).
-- Dictation `prepare()` calls `ensureLoaded()` (joins prewarm if in flight) and **retains** `AsrManager` across sessions.
+- As soon as the model is installed, `ParakeetPrewarmCoordinator` calls `loadInstalledAndRetain()` (disk only; never downloads).
+- Production registers the dictation hotkey only after launch prewarming has retained the model.
+- Dictation `prepare()` checks microphone access and calls `ensureLoaded()` as a fast warm-reuse invariant.
+- Stop/inference reuses the same retained `AsrManager` across sessions.
 - Cancelling a dictation session does **not** cancel shared model preparation.
 
 Requires Apple Silicon.
@@ -79,12 +81,13 @@ The fixture WAV is bundled from `Timbre/Fixtures/parakeet-smoke-test.wav` (copy 
 
 Start and Stop may come from the menu or the global shortcut (`⌃⇧D`; see [`GLOBAL_DICTATION_SHORTCUT.md`](GLOBAL_DICTATION_SHORTCUT.md)). Both paths use `AssistantController`.
 
-1. Start → capture target → Preparing (mic permission + `ensureLoaded()`)
-2. Listening (no live transcript text)
-3. Stop → Processing (convert snapshot → Parakeet inference)
-4. Completed → transcript copied; Command-V posted when target validation allows
-5. Copy Last Dictation copies only (never pastes again)
-6. A second Start reuses the loaded manager (no redownload)
+1. Launch → prewarm retained model → register production hotkey
+2. Start → capture target → Preparing (microphone permission + warm model reuse)
+3. Listening (no live transcript text)
+4. Stop → Processing (convert snapshot → Parakeet inference with retained model)
+5. Completed → transcript copied; Command-V posted when target validation allows
+6. Copy Last Dictation copies only (never pastes again)
+7. A second Start reuses the loaded manager (no redownload)
 
 Permissions: **microphone** and **Accessibility** (no Speech Recognition authorization on the production path).
 
@@ -113,7 +116,7 @@ Timbre maps shorter captures to `TranscriptionError.emptyResult` (no clipboard w
 - Batch after Stop only (no live partials, streaming, VAD, or auto-stop)
 - Apple Silicon required
 - First model download is large (~464 MB)
-- After readiness, the model is prewarmed into memory; Start during an active prewarm may still show Preparing until the shared load finishes (see [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md))
+- The model is prewarmed into memory as soon as it is installed. Until that one-time launch work completes, the menu reports “Starting dictation engine…” and the production hotkey remains unregistered. Once available, neither Start nor Processing pays the cold-load cost (see [`MODEL_PREWARMING.md`](MODEL_PREWARMING.md)).
 - Some apps may ignore synthetic Command-V; clipboard fallback always retains the transcript
 
 ## Related

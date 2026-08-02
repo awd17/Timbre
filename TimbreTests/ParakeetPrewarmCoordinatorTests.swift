@@ -4,6 +4,51 @@ import XCTest
 
 @MainActor
 final class ParakeetPrewarmCoordinatorTests: XCTestCase {
+    func testShortcutRecoveryPolicyAfterPrewarmCompletion() {
+        XCTAssertTrue(
+            TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                requiresLoadedModelBeforeShortcut: true,
+                skipsGlobalShortcut: false,
+                modelState: .loaded,
+                setupIsComplete: false
+            )
+        )
+        XCTAssertTrue(
+            TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                requiresLoadedModelBeforeShortcut: true,
+                skipsGlobalShortcut: false,
+                modelState: .installed,
+                setupIsComplete: true
+            ),
+            "A transient prewarm failure must not disable a returning user's shortcut."
+        )
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                requiresLoadedModelBeforeShortcut: true,
+                skipsGlobalShortcut: false,
+                modelState: .installed,
+                setupIsComplete: false
+            ),
+            "First-run setup must still wait until the retained load succeeds."
+        )
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                requiresLoadedModelBeforeShortcut: true,
+                skipsGlobalShortcut: false,
+                modelState: .notInstalled,
+                setupIsComplete: true
+            )
+        )
+        XCTAssertFalse(
+            TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                requiresLoadedModelBeforeShortcut: true,
+                skipsGlobalShortcut: true,
+                modelState: .loaded,
+                setupIsComplete: true
+            )
+        )
+    }
+
     func testConstructionAndIneligibleEvaluationDoNotLoad() {
         let model = FakeParakeetModelManager(initialState: .installed)
         let eligible = false
@@ -172,13 +217,23 @@ final class ParakeetPrewarmCoordinatorTests: XCTestCase {
         XCTAssertEqual(model.retainLoadOperationCount, 2)
     }
 
-    func testTransientFailureLeavesInstalledAndAllowsRetry() async throws {
+    func testTransientFailureAllowsReturningUserShortcutAndModelRetry() async throws {
         let model = FakeParakeetModelManager(initialState: .installed)
         model.retainLoadBehavior = .transientFailure("compile glitch")
+        var shouldStartShortcut = false
         let coordinator = ParakeetPrewarmCoordinator(
             modelManager: model,
             isEligible: { true },
-            isParakeetProductionBackend: true
+            isParakeetProductionBackend: true,
+            onModelStateChanged: {
+                shouldStartShortcut =
+                    TimbreAppDelegate.shouldStartShortcutAfterPrewarmCompletion(
+                        requiresLoadedModelBeforeShortcut: true,
+                        skipsGlobalShortcut: false,
+                        modelState: model.state,
+                        setupIsComplete: true
+                    )
+            }
         )
 
         coordinator.evaluate(source: .launchReadiness)
@@ -186,6 +241,7 @@ final class ParakeetPrewarmCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(model.state, .installed)
         XCTAssertEqual(model.loadInstalledAndRetainCallCount, 1)
+        XCTAssertTrue(shouldStartShortcut)
 
         model.retainLoadBehavior = .success
         try await model.loadInstalledAndRetain()
