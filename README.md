@@ -163,9 +163,14 @@ Make sure `MARKETING_VERSION` in the Timbre app target (both Debug and Release)
 matches the release tag without the leading `v`. To publish version `X.Y.Z`:
 
 ```bash
+scripts/bump-version.sh
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
+
+`scripts/bump-version.sh` increments the patch version automatically—for
+example, `1.0.6` becomes `1.0.7`—and updates both app configurations. Review and
+commit that change before tagging it.
 
 Pushing the tag starts the workflow. When it completes, the release appears on
 the repository's **Releases** page and the download link at the top of this
