@@ -616,10 +616,31 @@ final class SetupCoordinatorTests: XCTestCase {
         await waitUntil(timeout: 4) { coordinator.isRecheckingTextInsertion == false }
         XCTAssertEqual(coordinator.step, .textInsertionDenied)
         XCTAssertTrue(coordinator.textInsertionNeedsSystemSettings)
+        XCTAssertEqual(accessibility.requestCallCount, 1)
 
         // A later grant clears the prompt and advances to ready.
         accessibility.trustState = .trusted
         coordinator.applicationDidBecomeActive()
+        XCTAssertFalse(coordinator.textInsertionNeedsSystemSettings)
+        XCTAssertEqual(coordinator.step, .ready)
+    }
+
+    @MainActor
+    func testTryAgainReregistersAndAdvancesWhenAccessibilityBecomesTrusted() async {
+        defaults.set(true, forKey: SetupCoordinator.completedShortcutOnboardingKey)
+        let model = FakeParakeetModelManager(initialState: .installed)
+        let accessibility = FakeAccessibilityPermission(
+            trustState: .notTrusted,
+            hasOfferedPrompt: true
+        )
+        accessibility.trustAfterRequest = .trusted
+        let coordinator = makeCoordinator(model: model, accessibility: accessibility)
+        XCTAssertEqual(coordinator.step, .textInsertionDenied)
+
+        coordinator.recheckTextInsertion()
+        await waitUntil(timeout: 2) { coordinator.isRecheckingTextInsertion == false }
+
+        XCTAssertEqual(accessibility.requestCallCount, 1)
         XCTAssertFalse(coordinator.textInsertionNeedsSystemSettings)
         XCTAssertEqual(coordinator.step, .ready)
     }

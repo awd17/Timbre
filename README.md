@@ -43,6 +43,14 @@ Timbre needs Microphone access to hear your dictation. Accessibility access lets
 it insert the finished text into the app you were using. You can change either
 permission later in **System Settings → Privacy & Security**.
 
+Accessibility permission is associated with the signed app identity, not just
+the name shown in System Settings. The current GitHub workflow ad-hoc-signs
+the downloaded app, so replacing one build can leave an older **Timbre** row
+enabled while macOS still reports the new executable as untrusted. If that
+happens, quit Timbre, turn **Timbre** off and back on under **Privacy & Security
+→ Accessibility**, relaunch it, and press **Try Again**. **Timbre Debug** is a
+separate Xcode-signed app and has its own permission row.
+
 ## Use
 
 1. Put the cursor where you want the text to appear.
@@ -133,6 +141,11 @@ scripts/run-release-auth-smoke.sh --launch
 This builds and ad-hoc-signs the Release app, validates its embedded API
 configuration, and packages a local DMG without creating a GitHub release.
 Use `--fresh` for an interactive fresh-user reset.
+
+This smoke test validates the bundle and packaging path, but it cannot grant
+Accessibility permission to an ad-hoc code identity. A release that needs
+Accessibility to survive upgrades must be built with a stable Apple signing
+identity and then notarized; the current workflow does not do that yet.
 
 More implementation and test documentation lives in [`docs/`](docs/). Start
 with [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) for the current

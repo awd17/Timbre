@@ -50,7 +50,7 @@ macOS exposes Accessibility as **trusted** vs **not trusted**. There is no relia
 
 | API / state | Role |
 |-------------|------|
-| `AXIsProcessTrusted` / live `trustState` | Source of truth for readiness and paste gating |
+| `AXIsProcessTrustedWithOptions` / live `trustState` | Source of truth for readiness and paste gating |
 | `timbre.hasOfferedAccessibilityPrompt` | UX only — whether Timbre already offered the system prompt |
 | Prefs / offered flag | **Never** prove denial or readiness |
 
@@ -65,6 +65,20 @@ Xcode Debug builds use `com.augustdrakton.Timbre.debug` and appear in System
 Settings as **Timbre Debug**, separately from an installed release.
 
 Granting Accessibility should restore readiness without redownloading the model. Recheck on `applicationDidBecomeActive`. Whether trust applies without relaunch depends on the OS build; Timbre always re-reads live trust when active.
+
+### Downloaded release recovery
+
+Accessibility permission is tied to the app's code identity. Xcode Debug builds
+are signed with the development team and appear as **Timbre Debug**. The GitHub
+release workflow currently uses an ad-hoc signature for a release that does not
+yet have Developer ID signing configured. After replacing an ad-hoc build,
+macOS can show the **Timbre** switch as enabled while the new executable still
+returns `notTrusted`.
+
+For that case, quit Timbre, turn the **Timbre** switch off and back on in
+**System Settings → Privacy & Security → Accessibility**, relaunch Timbre, and
+press **Try Again**. The durable distribution fix is stable Apple signing and
+notarization; a local ad-hoc package cannot verify that behavior by itself.
 
 ## Setup order
 

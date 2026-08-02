@@ -34,7 +34,9 @@ final class AccessibilityPermissionService: AccessibilityPermissionProviding {
     init(
         defaults: UserDefaults = .standard,
         isProcessTrusted: @escaping () -> Bool = {
-            AXIsProcessTrusted()
+            let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+            let options = [promptKey: false] as CFDictionary
+            return AXIsProcessTrustedWithOptions(options)
         },
         requestSystemPrompt: @escaping () -> Void = {
             let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
