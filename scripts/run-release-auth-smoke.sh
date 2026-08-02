@@ -90,6 +90,8 @@ xcodebuild \
     -configuration Release \
     -destination 'generic/platform=macOS' \
     -derivedDataPath "${DERIVED_DATA}" \
+    ARCHS=arm64 \
+    ONLY_ACTIVE_ARCH=NO \
     CODE_SIGNING_ALLOWED=NO \
     "TIMBRE_API_BASE_URL=${API_BASE_URL}" \
     build
