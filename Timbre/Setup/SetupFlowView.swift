@@ -431,7 +431,7 @@ struct SetupFlowView: View {
             return "Re-checking System Settings…"
         }
         if needsSettings {
-            return "Timbre still can't insert text. Open System Settings, enable \(applicationDisplayName), then come back here."
+            return "Timbre still can't insert text. Open System Settings and enable \(applicationDisplayName). If it is already enabled, turn it off and back on, then come back here."
         }
         return "We couldn't confirm text-insertion access. Try again to recheck."
     }

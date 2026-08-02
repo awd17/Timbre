@@ -429,16 +429,30 @@ final class SetupCoordinator {
         isRecheckingTextInsertion = true
         recheckTask?.cancel()
         recheckTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
-            guard !Task.isCancelled else { return }
-            await MainActor.run { [weak self] in
-                guard let self else { return }
-                self.isRecheckingTextInsertion = false
-                self.reconcile(intent: .refresh)
-                // If we are still denied after the recheck, surface the System
-                // Settings call-to-action. A grant would have advanced the step.
-                self.textInsertionNeedsSystemSettings = (self.step == .textInsertionDenied)
+            guard let self else { return }
+
+            // Re-register the current executable as an Accessibility client before
+            // reading trust. This is important for ad-hoc release builds: a TCC row
+            // can remain enabled while referring to an older code identity.
+            _ = await self.accessibility.requestAccessIfNeeded()
+
+            // TCC changes are asynchronous. Poll the non-prompting live check for
+            // a short window instead of making the first post-Settings read the
+            // final verdict.
+            for _ in 0..<10 {
+                guard !Task.isCancelled else { return }
+                if self.accessibility.trustState == .trusted {
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
             }
+
+            guard !Task.isCancelled else { return }
+            self.isRecheckingTextInsertion = false
+            self.reconcile(intent: .refresh)
+            // If we are still denied after the recheck, surface the System
+            // Settings call-to-action. A grant would have advanced the step.
+            self.textInsertionNeedsSystemSettings = (self.step == .textInsertionDenied)
         }
         TimbreLog.line("Timbre onboarding: rechecking text-insertion permission")
     }

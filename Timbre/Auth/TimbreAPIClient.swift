@@ -56,6 +56,13 @@ final class TimbreAPIClient: TimbreAPIClienting, @unchecked Sendable {
             throw TimbreAPIError.invalidResponse
         }
 
+        let clerkStatus = http.value(forHTTPHeaderField: "x-clerk-auth-status") ?? "none"
+        let clerkReason = http.value(forHTTPHeaderField: "x-clerk-auth-reason") ?? "none"
+        TimbreLog.line(
+            "Timbre auth API: /api/me host=\(url.host ?? "unknown") status=\(http.statusCode) "
+                + "clerkStatus=\(clerkStatus) clerkReason=\(clerkReason)"
+        )
+
         switch http.statusCode {
         case 200:
             return try MeUserDecoder.decode(data)

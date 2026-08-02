@@ -37,7 +37,7 @@ base file referenced by the Timbre target and optionally includes the local file
 | `CLERK_OAUTH_CLIENT_ID` | Public OAuth client ID (no secret) |
 | `CLERK_AUTHORIZATION_URL` | `authorization_endpoint` from discovery |
 | `CLERK_TOKEN_URL` | `token_endpoint` from discovery |
-| `TIMBRE_API_BASE_URL` | Debug: `http://localhost:3000`; Release: `https://timbre.website/` |
+| `TIMBRE_API_BASE_URL` | Debug: `http://localhost:3000`; Release: `https://www.timbre.website/` |
 | `TIMBRE_AUTH_CALLBACK_SCHEME` | `timbre-auth` |
 | `TIMBRE_AUTH_REDIRECT_URI` | `timbre-auth://oauth/callback` |
 
@@ -65,6 +65,11 @@ These are substituted into `Timbre/Info.plist` at build time.
 
 Both Debug and Release Timbre targets use `Config/Auth.xcconfig` as their base
 configuration.
+
+The release API URL intentionally uses the canonical `www` host. The apex
+`https://timbre.website/` currently redirects to that host; `URLSession` does
+not forward an `Authorization` header across that cross-host redirect, so the
+apex URL makes every native request look signed out.
 
 ## UI entry points
 
@@ -94,9 +99,8 @@ when expired or on `401`, then retries `/api/me` once.
 
 ## Important: `/api/me` token verification
 
-The current `timbre-web` `GET /api/me` handler uses Clerk `auth()` with the
-default `session_token` acceptance. **OAuth bearer tokens are rejected until
-the web route accepts `oauth_token`**, for example:
+The deployed `timbre-web` `GET /api/me` handler must accept both browser
+sessions and native OAuth bearer tokens. Use Clerk's explicit token acceptance:
 
 ```ts
 const { isAuthenticated, userId } = await auth({
@@ -104,8 +108,30 @@ const { isAuthenticated, userId } = await auth({
 })
 ```
 
-That follow-up belongs in `timbre-web`, not this macOS PR. Until it ships,
-native sign-in can complete the OAuth exchange but `/api/me` may return `401`.
+The native app can complete the OAuth exchange and save credentials successfully
+while `/api/me` still returns `401` if this backend change is not deployed.
+
+## Pre-release Release-binary smoke test
+
+Run the local `timbre-web` checkout with its Clerk environment first:
+
+```bash
+cd ../timbre-web
+npm run dev
+```
+
+Then, from this repository, build and package the exact ad-hoc-signed Release
+shape used by GitHub without creating a release:
+
+```bash
+scripts/run-release-auth-smoke.sh --launch
+```
+
+The script defaults to `http://127.0.0.1:3000`, validates the Release bundle
+ID and embedded API URL, verifies the ad-hoc signature, and produces a local
+DMG. Add `--fresh` for an interactive fresh-user reset, or set
+`TIMBRE_RELEASE_SMOKE_API_BASE_URL=https://www.timbre.website/` to exercise the
+deployed API with the Release bundle's existing credentials.
 
 ## Manual test checklist
 
